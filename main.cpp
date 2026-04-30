@@ -50,12 +50,12 @@ std::vector<float> interpolate(int i0, float d0, int i1, float d1){
         return {d0};
     }
 
-    std::vector<float> values = {};
+    std::vector<float> values;
 
-    float a = (float) (d1 - d0) / (i1 - i0);
+    float a = (d1 - d0) / (i1 - i0);
     float d = d0;
 
-    for (int i = i0; i < i1; i++){
+    for (int i = i0; i <= i1; i++){
         values.push_back(d);
         d = d + a;
     }
@@ -74,8 +74,8 @@ void drawLine(Canvas& c, vec2 p0, vec2 p1, Pixel color){
 
         auto ys = interpolate(p0.x, p0.y, p1.x, p1.y);
 
-        for (int x = p0.x; x < p1.x; x++){
-            c.putPixel(x, ys[x - p0.x], color);
+        for (int x = p0.x; x <= p1.x; x++){
+            c.putPixel(x, (int) ys[x - p0.x], color);
         }
     }
     else {
@@ -85,22 +85,54 @@ void drawLine(Canvas& c, vec2 p0, vec2 p1, Pixel color){
 
         auto xs = interpolate(p0.y, p0.x, p1.y, p1.x);
 
-        for (int y = p0.y; y < p1.y; y++){
-            c.putPixel(xs[y - p0.y], y, color);
+        for (int y = p0.y; y <= p1.y; y++){
+            c.putPixel((int) xs[y - p0.y], y, color);
         }
     }
+}
+
+void drawFilledTriangle(Canvas& c, vec2 p0, vec2 p1, vec2 p2, Pixel color){
+    if (p1.y < p0.y) std::swap(p1, p0);
+    if (p2.y < p0.y) std::swap(p2, p0);
+    if (p2.y < p1.y) std::swap(p2, p1);
 
 
+    std::vector<float> x01 = interpolate(p0.y, p0.x, p1.y, p1.x);
+    std::vector<float> x12 = interpolate(p1.y, p1.x, p2.y, p2.x);
+    std::vector<float> x02 = interpolate(p0.y, p0.x, p2.y, p2.x);
+
+    x01.pop_back();
+    std::vector<float> x012;
+    x012.reserve(x01.size() + x12.size());
+    x012.insert(x012.end(), x01.begin(), x01.end());
+    x012.insert(x012.end(), x12.begin(), x12.end());
+
+    int m = x012.size() / 2;
+
+    std::vector<float> x_left;
+    std::vector<float> x_right;
+
+    if (x02[m] < x012[m]){
+        x_left = x02;
+        x_right = x012;
+    } else {
+        x_left = x012;
+        x_right = x02;
+    }
+
+    for (int y = p0.y; y <= p2.y; y++){
+        for (int x = (int) x_left[y - p0.y]; x <= (int) x_right[y - p0.y]; x++){
+        c.putPixel(x, y, color);
+        }
+    }
 }
 
 int main(){
-    auto c = Canvas(201, 201);
+    Canvas c(1000, 1000);
 
     Pixel color = {255, 255, 255};
-    drawLine(c, vec2 {-30, -30}, vec2 {30, 30}, color);
-    drawLine(c, vec2 {-30, 30}, vec2 {30, -30}, color);
-    drawLine(c, vec2 {0, -100}, vec2 {0, 100}, color);
 
+    drawFilledTriangle(c, vec2 {-100, 0}, vec2 {10, 0}, vec2 {0, 250}, color);
 
     c.save();
     return 0;
