@@ -19,7 +19,11 @@ struct Canvas {
   // pixel (x, y) is at pixels[y*width + x]
   std::vector<Pixel> pixels;
 
-  Canvas(int w, int h) : width(w), height(h), pixels(w * h) {}
+  Canvas(int w, int h) : width(w), height(h), pixels(w * h) {
+      for (Pixel& p : pixels){
+          p = Pixel{255, 255, 255};
+      }
+  }
 
   void putPixelRaw(int x, int y, Pixel pixel) {
     // (x, y) in screen coordinates
@@ -130,9 +134,9 @@ void drawFilledTriangle(Canvas &c, vec2 p0, vec2 p1, vec2 p2, Pixel color) {
 int main() {
   Canvas c(1000, 1000);
 
-  Pixel color = {255, 255, 255};
+  Pixel color = {0, 255, 0};
 
-  drawFilledTriangle(c, vec2{-100, 0}, vec2{10, 0}, vec2{0, 250}, color);
+  drawFilledTriangle(c, vec2{-200, -250}, vec2{200, 50}, vec2{20, 250}, color);
 
   c.save();
   return 0;
