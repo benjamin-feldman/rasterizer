@@ -9,7 +9,14 @@ struct vec2 {
 };
 
 struct Pixel {
+  // TODO: make this inherit a vec3, with usual operators implemented
   uint8_t r, g, b;
+};
+
+struct ScreenVertex {
+  vec2 pos;
+  float h;
+  ScreenVertex(vec2 pos, float h) : pos(pos), h(h) {}
 };
 
 struct Canvas {
@@ -19,11 +26,7 @@ struct Canvas {
   // pixel (x, y) is at pixels[y*width + x]
   std::vector<Pixel> pixels;
 
-  Canvas(int w, int h) : width(w), height(h), pixels(w * h) {
-      for (Pixel& p : pixels){
-          p = Pixel{255, 255, 255};
-      }
-  }
+  Canvas(int w, int h) : width(w), height(h), pixels(w * h, Pixel{255, 255, 255}) {}
 
   void putPixelRaw(int x, int y, Pixel pixel) {
     // (x, y) in screen coordinates
@@ -93,17 +96,21 @@ void drawLine(Canvas &c, vec2 p0, vec2 p1, Pixel color) {
   }
 }
 
-void drawFilledTriangle(Canvas &c, vec2 p0, vec2 p1, vec2 p2, Pixel color) {
-  if (p1.y < p0.y)
+void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
+                        ScreenVertex p2, Pixel color) {
+  if (p1.pos.y < p0.pos.y)
     std::swap(p1, p0);
-  if (p2.y < p0.y)
+  if (p2.pos.y < p0.pos.y)
     std::swap(p2, p0);
-  if (p2.y < p1.y)
+  if (p2.pos.y < p1.pos.y)
     std::swap(p2, p1);
 
-  std::vector<float> x01 = interpolate(p0.y, p0.x, p1.y, p1.x);
-  std::vector<float> x12 = interpolate(p1.y, p1.x, p2.y, p2.x);
-  std::vector<float> x02 = interpolate(p0.y, p0.x, p2.y, p2.x);
+  std::vector<float> x01 = interpolate(p0.pos.y, p0.pos.x, p1.pos.y, p1.pos.x);
+  std::vector<float> h01 = interpolate(p0.pos.y, p0.h, p1.pos.y, p1.h);
+  std::vector<float> x12 = interpolate(p1.pos.y, p1.pos.x, p2.pos.y, p2.pos.x);
+  std::vector<float> h12 = interpolate(p1.pos.y, p1.h, p2.pos.y, p2.h);
+  std::vector<float> x02 = interpolate(p0.pos.y, p0.pos.x, p2.pos.y, p2.pos.x);
+  std::vector<float> h02 = interpolate(p0.pos.y, p0.h, p2.pos.y, p2.h);
 
   x01.pop_back();
   std::vector<float> x012;
@@ -111,22 +118,49 @@ void drawFilledTriangle(Canvas &c, vec2 p0, vec2 p1, vec2 p2, Pixel color) {
   x012.insert(x012.end(), x01.begin(), x01.end());
   x012.insert(x012.end(), x12.begin(), x12.end());
 
+  h01.pop_back();
+  std::vector<float> h012;
+  h012.reserve(h01.size() + h12.size());
+  h012.insert(h012.end(), h01.begin(), h01.end());
+  h012.insert(h012.end(), h12.begin(), h12.end());
+
   int m = x012.size() / 2;
 
   std::vector<float> x_left;
   std::vector<float> x_right;
+  std::vector<float> h_left;
+  std::vector<float> h_right;
 
   if (x02[m] < x012[m]) {
     x_left = x02;
+    h_left = h02;
+
     x_right = x012;
+    h_right = h012;
   } else {
     x_left = x012;
+    h_left = h012;
+
     x_right = x02;
+    h_right = h02;
   }
 
-  for (int y = p0.y; y <= p2.y; y++) {
-    for (int x = (int)x_left[y - p0.y]; x <= (int)x_right[y - p0.y]; x++) {
-      c.putPixel(x, y, color);
+  for (int y = p0.pos.y; y <= p2.pos.y; y++) {
+    int x_l = (int)x_left[y - p0.pos.y];
+    int x_r = (int)x_right[y - p0.pos.y];
+
+    std::vector<float> h_segment =
+        interpolate(x_l, h_left[y - p0.pos.y], x_r, h_right[y - p0.pos.y]);
+
+    for (int x = x_l; x <= x_r; x++) {
+      float h = h_segment[x - x_l];
+      Pixel shaded_color = {
+          static_cast<uint8_t>(color.r * h),
+          static_cast<uint8_t>(color.g * h),
+          static_cast<uint8_t>(color.b * h),
+      };
+
+      c.putPixel(x, y, shaded_color);
     }
   }
 }
@@ -135,8 +169,11 @@ int main() {
   Canvas c(1000, 1000);
 
   Pixel color = {0, 255, 0};
+  ScreenVertex p0(vec2{-200, -250}, 0.0f);
+  ScreenVertex p1(vec2{200, 50}, 1.0f);
+  ScreenVertex p2(vec2{20, 250}, 0.5f);
 
-  drawFilledTriangle(c, vec2{-200, -250}, vec2{200, 50}, vec2{20, 250}, color);
+  drawShadedTriangle(c, p0, p1, p2, color);
 
   c.save();
   return 0;
