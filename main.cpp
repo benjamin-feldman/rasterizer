@@ -26,7 +26,8 @@ struct Canvas {
   // pixel (x, y) is at pixels[y*width + x]
   std::vector<Pixel> pixels;
 
-  Canvas(int w, int h) : width(w), height(h), pixels(w * h, Pixel{255, 255, 255}) {}
+  Canvas(int w, int h)
+      : width(w), height(h), pixels(w * h, Pixel{255, 255, 255}) {}
 
   void putPixelRaw(int x, int y, Pixel pixel) {
     // (x, y) in screen coordinates
@@ -51,6 +52,8 @@ struct Canvas {
 };
 
 std::vector<float> interpolate(int i0, float d0, int i1, float d1) {
+
+  // interpolate d = f(i) between (i0, d0) and (i1, d1)
 
   if (i0 == i1) {
     return {d0};
