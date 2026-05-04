@@ -21,33 +21,33 @@ struct ScreenVertex {
 };
 
 struct Canvas {
-  int width, height;
+  int Cw, Ch;
 
   // Contiguous list of pixels
   // pixel (x, y) is at pixels[y*width + x]
   std::vector<Pixel> pixels;
 
   Canvas(int w, int h)
-      : width(w), height(h), pixels(w * h, Pixel{255, 255, 255}) {}
+      : Cw(w), Ch(h), pixels(w * h, Pixel{255, 255, 255}) {}
 
   void putPixelRaw(int x, int y, Pixel pixel) {
     // (x, y) in screen coordinates
-    assert(x >= 0 && x < width);
-    assert(y >= 0 && y < height);
-    pixels[y * width + x] = pixel;
+    assert(x >= 0 && x < Cw);
+    assert(y >= 0 && y < Ch);
+    pixels[y * Cw + x] = pixel;
   }
 
   void putPixel(int x, int y, Pixel pixel) {
     // (x, y) in math coordinates
-    int sx = width / 2 + x;
-    int sy = height / 2 - y;
+    int sx = Cw / 2 + x;
+    int sy = Ch / 2 - y;
     putPixelRaw(sx, sy, pixel);
   }
 
   void save() {
     FILE *f = fopen("out.ppm", "wb");
-    fprintf(f, "P6\n%d %d\n255\n", width, height);
-    fwrite(pixels.data(), sizeof(Pixel), width * height, f);
+    fprintf(f, "P6\n%d %d\n255\n", Cw, Ch);
+    fwrite(pixels.data(), sizeof(Pixel), Cw * Ch, f);
     fclose(f);
   }
 };
