@@ -9,6 +9,10 @@ struct vec2 {
   int x, y;
 };
 
+struct vec3 {
+    int x, y, z;
+};
+
 struct Pixel {
   // TODO: make this inherit a vec3, with usual operators implemented
   uint8_t r, g, b;
@@ -19,6 +23,8 @@ struct ScreenVertex {
   float h;
   ScreenVertex(vec2 pos, float h) : pos(pos), h(h) {}
 };
+
+
 
 struct Canvas {
   int Cw, Ch;
@@ -50,6 +56,20 @@ struct Canvas {
     fwrite(pixels.data(), sizeof(Pixel), Cw * Ch, f);
     fclose(f);
   }
+};
+
+struct Viewport {
+    int Vw, Vh, d;
+    Viewport(int w, int h, int d) : Vw(w), Vh(h), d(d) {};
+
+    vec2 toCanvas(vec2 p, const Canvas& c) const {
+        return { p.x * c.Cw/Vw, p.y * c.Ch/Vh };
+    }
+
+    vec2 projectVertex(vec3 v, const Canvas& c) const {
+        return toCanvas({v.x * d / v.z, v.y * d / v.z}, c);
+    }
+
 };
 
 std::vector<float> interpolate(int i0, float d0, int i1, float d1) {
@@ -171,13 +191,44 @@ void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
 
 int main() {
   Canvas c(1000, 1000);
+  Viewport vp(400, 400, 50);
 
   Pixel color = {0, 255, 0};
   ScreenVertex p0(vec2{-200, -250}, 0.0f);
   ScreenVertex p1(vec2{200, 50}, 1.0f);
   ScreenVertex p2(vec2{20, 250}, 0.5f);
 
-  drawShadedTriangle(c, p0, p1, p2, color);
+  // drawShadedTriangle(c, p0, p1, p2, color);
+
+  // The four "front" vertices
+  vec3 vAf = {-1, 2, 1};
+  vec3 vBf = { 1, 2, 1};
+  vec3 vCf = { 1, -1, 1};
+  vec3 vDf = {-1, -1, 1};
+  // The four "back" vertices
+  vec3 vAb = {-3, 1, 2};
+  vec3 vBb = { -1, 1, 2};
+  vec3 vCb = { -1, -1, 2};
+  vec3 vDb = {-3, -1, 2};
+
+  Pixel red = {255, 0, 0};
+  Pixel green = {0, 255, 0};
+  Pixel blue = {0, 0, 255};
+
+  drawLine(c, vp.projectVertex(vAf, c), vp.projectVertex(vBf, c), blue);
+  drawLine(c, vp.projectVertex(vBf, c), vp.projectVertex(vCf, c), blue);
+  drawLine(c, vp.projectVertex(vCf, c), vp.projectVertex(vDf, c), blue);
+  drawLine(c, vp.projectVertex(vDf, c), vp.projectVertex(vAf, c), blue);
+
+  drawLine(c, vp.projectVertex(vAb, c), vp.projectVertex(vBb, c), red);
+  drawLine(c, vp.projectVertex(vBb, c), vp.projectVertex(vCb, c), red);
+  drawLine(c, vp.projectVertex(vCb, c), vp.projectVertex(vDb, c), red);
+  drawLine(c, vp.projectVertex(vDb, c), vp.projectVertex(vAb, c), red);
+
+  drawLine(c, vp.projectVertex(vAf, c), vp.projectVertex(vAb, c), green);
+  drawLine(c, vp.projectVertex(vBf, c), vp.projectVertex(vBb, c), green);
+  drawLine(c, vp.projectVertex(vCf, c), vp.projectVertex(vCb, c), green);
+  drawLine(c, vp.projectVertex(vDf, c), vp.projectVertex(vDb, c), green);
 
   c.save();
   return 0;
