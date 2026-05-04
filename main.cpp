@@ -5,6 +5,7 @@
 #include <vector>
 
 struct vec2 {
+    //TODO: make this double
   int x, y;
 };
 
