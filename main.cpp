@@ -32,6 +32,12 @@ vec3 operator+(vec3 a, vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 vec3 operator-(vec3 a, vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 vec3 operator*(double s, vec3 a) { return {s * a.x, s * a.y, s * a.z}; }
 
+double dot(vec3 a, vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
+vec3 cross(vec3 a, vec3 b) {
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
+}
+vec3 normalize(vec3 a) { return (1.0 / sqrt(dot(a, a))) * a; }
+
 using Color = vec3; // r,g,b in [0, 1]
 using Point3 = vec3;
 
@@ -100,6 +106,16 @@ mat4 rotationZ(double theta) {
   return {{{cos(theta), -sin(theta), 0, 0},
            {sin(theta), cos(theta), 0, 0},
            {0, 0, 1, 0},
+           {0, 0, 0, 1}}};
+}
+
+mat4 lookAt(vec3 eye, vec3 target, vec3 worldUp = {0, 1, 0}) {
+  vec3 forward = normalize(target - eye);
+  vec3 right = normalize(cross(worldUp, forward));
+  vec3 up = cross(forward, right);
+  return {{{right.x, right.y, right.z, -dot(right, eye)},
+           {up.x, up.y, up.z, -dot(up, eye)},
+           {forward.x, forward.y, forward.z, -dot(forward, eye)},
            {0, 0, 0, 1}}};
 }
 
@@ -369,16 +385,17 @@ void renderModel(Canvas &c, const ModelInstance &instance,
 
 struct Camera {
   vec3 position;
-  vec3 lookAt;
+  vec3 direction;
 };
 
 void renderScene(Canvas &c, Viewport &vp, Camera camera,
                  const std::vector<ModelInstance> &instances) {
-  mat4 cameraMatrix = identity();
+  mat4 cameraMatrix = lookAt(camera.position, camera.direction);
   mat34 projectionMatrix =
       canvasProjectionMatrix(vp.d, c.Cw, c.Ch, vp.Vw, vp.Vh);
+  mat34 fullProjection = projectionMatrix * cameraMatrix;
   for (const auto &instance : instances) {
-    renderModel(c, instance, projectionMatrix);
+    renderModel(c, instance, fullProjection);
   }
 }
 
@@ -414,7 +431,7 @@ int main() {
 
   std::vector<ModelInstance> scene = {cube_1, cube_2};
 
-  Camera camera = {vec3{0, 0, 0}, vec3{0, 0, 1}};
+  Camera camera = {vec3{0, 0, -10}, vec3{2, 1, 1}};
 
   renderScene(c, vp, camera, scene);
 
