@@ -5,6 +5,8 @@
 #include <utility>
 #include <vector>
 
+const bool DEBUG_AXES = true;
+
 // Types
 
 struct vec2 {
@@ -67,7 +69,6 @@ vec4 operator*(const mat4 &a, const vec4 &u) {
 }
 
 vec4 toVec4(vec3 v) { return {v.x, v.y, v.z, 1}; }
-vec3 perspectiveDivide(vec4 v) { return {v.x / v.w, v.y / v.w, v.z / v.w}; }
 
 mat4 identity() {
   return {{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}}};
@@ -102,6 +103,37 @@ mat4 rotationZ(double theta) {
            {0, 0, 0, 1}}};
 }
 
+// mat34: only needed for perspective projection
+struct mat34 {
+  double m[3][4] = {};
+};
+
+vec3 operator*(const mat34 &a, const vec4 &u) {
+  double v[3] = {};
+  for (int i = 0; i < 3; i++) {
+    v[i] =
+        a.m[i][0] * u.x + a.m[i][1] * u.y + a.m[i][2] * u.z + a.m[i][3] * u.w;
+  }
+  return vec3{v[0], v[1], v[2]};
+}
+
+mat34 operator*(const mat34 &a, const mat4 &b) {
+  mat34 c;
+  for (int i = 0; i < 3; i++) {
+    for (int j = 0; j < 4; j++) {
+      for (int k = 0; k < 4; k++) {
+        c.m[i][j] += a.m[i][k] * b.m[k][j];
+      }
+    }
+  }
+  return c;
+}
+
+mat34 canvasProjectionMatrix(double d, int Cw, int Ch, double Vw, double Vh) {
+  // projects from Camera space to Canvas
+  return {{{d * Cw / Vw, 0, 0, 0}, {0, d * Ch / Vh, 0, 0}, {0, 0, 1, 0}}};
+}
+
 double clamp(double x, double a, double b) {
   // returns x if x in [a, b], otherwise it returns the closest boundary
   return std::min(std::max(a, x), b);
@@ -126,6 +158,20 @@ struct Triangle {
   Color color;
 };
 
+struct Model {
+  char name[16];
+  std::vector<vec4> vertices;
+  std::vector<Triangle> triangles;
+};
+
+struct ModelInstance {
+  Model model;
+  mat4 transform;
+
+  ModelInstance(Model model, mat4 transform)
+      : model(model), transform(transform) {}
+};
+
 struct Canvas {
   int Cw, Ch;
 
@@ -133,7 +179,10 @@ struct Canvas {
   // pixel (x, y) is at pixels[y*width + x]
   std::vector<Pixel> pixels;
 
-  Canvas(int w, int h) : Cw(w), Ch(h), pixels(w * h, Pixel{255, 255, 255}) {}
+  Canvas(int w, int h) : Cw(w), Ch(h), pixels(w * h, Pixel{255, 255, 255}) {
+    if (DEBUG_AXES)
+      drawAxis();
+  }
 
   void putPixelRaw(int x, int y, Pixel pixel) {
     // (x, y) in screen coordinates
@@ -149,6 +198,19 @@ struct Canvas {
     putPixelRaw(sx, sy, pixel);
   }
 
+  void drawAxis() {
+    int midW = Cw / 2;
+    int midH = Ch / 2;
+    Pixel grey = {150, 150, 150};
+    for (int i = 0; i < Cw; i++) {
+      putPixelRaw(i, midH, grey);
+    }
+
+    for (int j = 0; j < Ch; j++) {
+      putPixelRaw(midW, j, grey);
+    }
+  }
+
   void save() {
     FILE *f = fopen("out.ppm", "wb");
     fprintf(f, "P6\n%d %d\n255\n", Cw, Ch);
@@ -160,14 +222,6 @@ struct Canvas {
 struct Viewport {
   double Vw, Vh, d;
   Viewport(int w, int h, double d) : Vw(w), Vh(h), d(d) {};
-
-  vec2 toCanvas(vec2 p, const Canvas &c) const {
-    return {p.x * c.Cw / Vw, p.y * c.Ch / Vh};
-  }
-
-  vec2 projectVertex(const Canvas &c, vec3 v) const {
-    return toCanvas({v.x * d / v.z, v.y * d / v.z}, c);
-  }
 };
 
 std::vector<double> interpolate(int i0, double d0, int i1, double d1) {
@@ -289,28 +343,47 @@ void drawWireframeTriangle(Canvas &c, vec2 p0, vec2 p1, vec2 p2, Color color) {
 }
 
 void renderTriangle(Canvas &c, Triangle t,
-                    std::vector<vec2> projectedVertices) {
+                    const std::vector<vec2> &projectedVertices) {
   drawWireframeTriangle(c, projectedVertices[t.idx[0]],
                         projectedVertices[t.idx[1]],
                         projectedVertices[t.idx[2]], t.color);
 }
 
-void renderObject(Canvas &c, Viewport &vp, std::vector<vec3> vertices,
-                  std::vector<Triangle> triangles) {
+void renderModel(Canvas &c, const ModelInstance &instance,
+                 mat34 projectionMatrix) {
   std::vector<vec2> projectedVertices;
-  projectedVertices.reserve(vertices.size());
+  projectedVertices.reserve(instance.model.vertices.size());
+  mat34 transform = projectionMatrix * instance.transform;
 
-  for (const auto &v : vertices) {
-    projectedVertices.push_back(vp.projectVertex(c, v));
+  for (const auto &v : instance.model.vertices) {
+    vec3 projectedVertex = transform * v;
+    vec2 canvasVertex = {projectedVertex.x / projectedVertex.z,
+                         projectedVertex.y / projectedVertex.z};
+    projectedVertices.push_back(canvasVertex);
   }
 
-  for (const auto &t : triangles) {
+  for (const auto &t : instance.model.triangles) {
     renderTriangle(c, t, projectedVertices);
   }
 }
 
+struct Camera {
+  vec3 position;
+  vec3 lookAt;
+};
+
+void renderScene(Canvas &c, Viewport &vp, Camera camera,
+                 const std::vector<ModelInstance> &instances) {
+  mat4 cameraMatrix = identity();
+  mat34 projectionMatrix =
+      canvasProjectionMatrix(vp.d, c.Cw, c.Ch, vp.Vw, vp.Vh);
+  for (const auto &instance : instances) {
+    renderModel(c, instance, projectionMatrix);
+  }
+}
+
 int main() {
-  Canvas c(500, 500);
+  Canvas c(750, 750);
   Viewport vp(400, 400, 350);
 
   Color red = {1, 0, 0};
@@ -320,13 +393,9 @@ int main() {
   Color cyan = {0.17, 1, 1};
   Color purple = {.5, .5, .5};
 
-  std::vector<vec3> vertices = {{1, 1, 1},    {-1, 1, 1}, {-1, -1, 1},
-                                {1, -1, 1},   {1, 1, -1}, {-1, 1, -1},
-                                {-1, -1, -1}, {1, -1, -1}};
-  vec3 offset = {-2, 0, 7};
-  for (auto &v : vertices) {
-    v = v + offset;
-  }
+  std::vector<vec4> vertices = {{1, 1, 1, 1},    {-1, 1, 1, 1}, {-1, -1, 1, 1},
+                                {1, -1, 1, 1},   {1, 1, -1, 1}, {-1, 1, -1, 1},
+                                {-1, -1, -1, 1}, {1, -1, -1, 1}};
 
   std::vector<Triangle> triangles = {
       {{0, 1, 2}, red},    {{0, 2, 3}, red},    {{4, 0, 3}, green},
@@ -334,7 +403,20 @@ int main() {
       {{1, 5, 6}, yellow}, {{1, 6, 2}, yellow}, {{4, 5, 1}, purple},
       {{4, 1, 0}, purple}, {{2, 6, 7}, cyan},   {{2, 7, 3}, cyan}};
 
-  renderObject(c, vp, vertices, triangles);
+  Model cube = {"cube", vertices, triangles};
+
+  double PI = 3.14159;
+  mat4 transform_1 = translation(vec3{-2, 2, 10}) * rotationX(PI / 2) *
+                     scaling(vec3{0.5, 0.5, 1});
+  mat4 transform_2 = translation(vec3{2, 0, 8}) * rotationZ(PI / 3);
+  ModelInstance cube_1(cube, transform_1);
+  ModelInstance cube_2(cube, transform_2);
+
+  std::vector<ModelInstance> scene = {cube_1, cube_2};
+
+  Camera camera = {vec3{0, 0, 0}, vec3{0, 0, 1}};
+
+  renderScene(c, vp, camera, scene);
 
   c.save();
   return 0;
