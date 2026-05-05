@@ -1,4 +1,5 @@
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <utility>
@@ -35,6 +36,71 @@ using Point3 = vec3;
 struct Pixel {
   uint8_t r, g, b;
 };
+
+struct vec4 {
+  double x, y, z, w;
+};
+
+struct mat4 {
+  double m[4][4] = {};
+};
+
+mat4 operator*(const mat4 &a, const mat4 &b) {
+  mat4 c;
+  for (int i = 0; i < 4; i++) {
+    for (int j = 0; j < 4; j++) {
+      for (int k = 0; k < 4; k++) {
+        c.m[i][j] += a.m[i][k] * b.m[k][j];
+      }
+    }
+  }
+  return c;
+}
+
+vec4 operator*(const mat4 &a, const vec4 &u) {
+  double v[4];
+  for (int i = 0; i < 4; i++) {
+    v[i] =
+        a.m[i][0] * u.x + a.m[i][1] * u.y + a.m[i][2] * u.z + a.m[i][3] * u.w;
+  }
+  return vec4{v[0], v[1], v[2], v[3]};
+}
+
+vec4 toVec4(vec3 v) { return {v.x, v.y, v.z, 1}; }
+vec3 perspectiveDivide(vec4 v) { return {v.x / v.w, v.y / v.w, v.z / v.w}; }
+
+mat4 identity() {
+  return {{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}}};
+}
+
+mat4 translation(vec3 t) {
+  return {{{1, 0, 0, t.x}, {0, 1, 0, t.y}, {0, 0, 1, t.z}, {0, 0, 0, 1}}};
+}
+
+mat4 scaling(vec3 s) {
+  return {{{s.x, 0, 0, 0}, {0, s.y, 0, 0}, {0, 0, s.z, 0}, {0, 0, 0, 1}}};
+}
+
+mat4 rotationX(double theta) {
+  return {{{1, 0, 0, 0},
+           {0, cos(theta), -sin(theta), 0},
+           {0, sin(theta), cos(theta), 0},
+           {0, 0, 0, 1}}};
+}
+
+mat4 rotationY(double theta) {
+  return {{{cos(theta), 0, sin(theta), 0},
+           {0, 1, 0, 0},
+           {-sin(theta), 0, cos(theta), 0},
+           {0, 0, 0, 1}}};
+}
+
+mat4 rotationZ(double theta) {
+  return {{{cos(theta), -sin(theta), 0, 0},
+           {sin(theta), cos(theta), 0, 0},
+           {0, 0, 1, 0},
+           {0, 0, 0, 1}}};
+}
 
 double clamp(double x, double a, double b) {
   // returns x if x in [a, b], otherwise it returns the closest boundary
@@ -258,8 +324,8 @@ int main() {
                                 {1, -1, 1},   {1, 1, -1}, {-1, 1, -1},
                                 {-1, -1, -1}, {1, -1, -1}};
   vec3 offset = {-2, 0, 7};
-  for (auto &v: vertices){
-      v =  v + offset;
+  for (auto &v : vertices) {
+    v = v + offset;
   }
 
   std::vector<Triangle> triangles = {
@@ -267,7 +333,6 @@ int main() {
       {{4, 3, 7}, green},  {{5, 4, 7}, blue},   {{5, 7, 6}, blue},
       {{1, 5, 6}, yellow}, {{1, 6, 2}, yellow}, {{4, 5, 1}, purple},
       {{4, 1, 0}, purple}, {{2, 6, 7}, cyan},   {{2, 7, 3}, cyan}};
-
 
   renderObject(c, vp, vertices, triangles);
 
