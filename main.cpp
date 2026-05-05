@@ -55,6 +55,11 @@ struct ScreenVertex {
   ScreenVertex(vec2 pos, double h) : pos(pos), h(h) {}
 };
 
+struct Triangle {
+  int idx[3];
+  Color color;
+};
+
 struct Canvas {
   int Cw, Ch;
 
@@ -94,7 +99,7 @@ struct Viewport {
     return {p.x * c.Cw / Vw, p.y * c.Ch / Vh};
   }
 
-  vec2 projectVertex(vec3 v, const Canvas &c) const {
+  vec2 projectVertex(const Canvas &c, vec3 v) const {
     return toCanvas({v.x * d / v.z, v.y * d / v.z}, c);
   }
 };
@@ -211,46 +216,60 @@ void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
   }
 }
 
+void drawWireframeTriangle(Canvas &c, vec2 p0, vec2 p1, vec2 p2, Color color) {
+  drawLine(c, p0, p1, color);
+  drawLine(c, p0, p2, color);
+  drawLine(c, p1, p2, color);
+}
+
+void renderTriangle(Canvas &c, Triangle t,
+                    std::vector<vec2> projectedVertices) {
+  drawWireframeTriangle(c, projectedVertices[t.idx[0]],
+                        projectedVertices[t.idx[1]],
+                        projectedVertices[t.idx[2]], t.color);
+}
+
+void renderObject(Canvas &c, Viewport &vp, std::vector<vec3> vertices,
+                  std::vector<Triangle> triangles) {
+  std::vector<vec2> projectedVertices;
+  projectedVertices.reserve(vertices.size());
+
+  for (const auto &v : vertices) {
+    projectedVertices.push_back(vp.projectVertex(c, v));
+  }
+
+  for (const auto &t : triangles) {
+    renderTriangle(c, t, projectedVertices);
+  }
+}
+
 int main() {
-  Canvas c(1000, 1000);
-  Viewport vp(400, 400, 50);
-
-  Color color = {0, 1, 0};
-  ScreenVertex p0(vec2{-200, -250}, 0.0f);
-  ScreenVertex p1(vec2{200, 50}, 1.0f);
-  ScreenVertex p2(vec2{20, 250}, 0.5f);
-
-  drawShadedTriangle(c, p0, p1, p2, color);
-
-  // The four "front" vertices
-  vec3 vAf = {-1, 2, 1};
-  vec3 vBf = {1, 2, 1};
-  vec3 vCf = {1, -1, 1};
-  vec3 vDf = {-1, -1, 1};
-  // The four "back" vertices
-  vec3 vAb = {-3, 1, 2};
-  vec3 vBb = {-1, 1, 2};
-  vec3 vCb = {-1, -1, 2};
-  vec3 vDb = {-3, -1, 2};
+  Canvas c(500, 500);
+  Viewport vp(400, 400, 350);
 
   Color red = {1, 0, 0};
   Color green = {0, 1, 0};
   Color blue = {0, 0, 1};
+  Color yellow = {1, 1, 0};
+  Color cyan = {0.17, 1, 1};
+  Color purple = {.5, .5, .5};
 
-  drawLine(c, vp.projectVertex(vAf, c), vp.projectVertex(vBf, c), blue);
-  drawLine(c, vp.projectVertex(vBf, c), vp.projectVertex(vCf, c), blue);
-  drawLine(c, vp.projectVertex(vCf, c), vp.projectVertex(vDf, c), blue);
-  drawLine(c, vp.projectVertex(vDf, c), vp.projectVertex(vAf, c), blue);
+  std::vector<vec3> vertices = {{1, 1, 1},    {-1, 1, 1}, {-1, -1, 1},
+                                {1, -1, 1},   {1, 1, -1}, {-1, 1, -1},
+                                {-1, -1, -1}, {1, -1, -1}};
+  vec3 offset = {-2, 0, 7};
+  for (auto &v: vertices){
+      v =  v + offset;
+  }
 
-  drawLine(c, vp.projectVertex(vAb, c), vp.projectVertex(vBb, c), red);
-  drawLine(c, vp.projectVertex(vBb, c), vp.projectVertex(vCb, c), red);
-  drawLine(c, vp.projectVertex(vCb, c), vp.projectVertex(vDb, c), red);
-  drawLine(c, vp.projectVertex(vDb, c), vp.projectVertex(vAb, c), red);
+  std::vector<Triangle> triangles = {
+      {{0, 1, 2}, red},    {{0, 2, 3}, red},    {{4, 0, 3}, green},
+      {{4, 3, 7}, green},  {{5, 4, 7}, blue},   {{5, 7, 6}, blue},
+      {{1, 5, 6}, yellow}, {{1, 6, 2}, yellow}, {{4, 5, 1}, purple},
+      {{4, 1, 0}, purple}, {{2, 6, 7}, cyan},   {{2, 7, 3}, cyan}};
 
-  drawLine(c, vp.projectVertex(vAf, c), vp.projectVertex(vAb, c), green);
-  drawLine(c, vp.projectVertex(vBf, c), vp.projectVertex(vBb, c), green);
-  drawLine(c, vp.projectVertex(vCf, c), vp.projectVertex(vCb, c), green);
-  drawLine(c, vp.projectVertex(vDf, c), vp.projectVertex(vDb, c), green);
+
+  renderObject(c, vp, vertices, triangles);
 
   c.save();
   return 0;
