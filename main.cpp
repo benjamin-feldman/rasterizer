@@ -6,6 +6,8 @@
 #include <vector>
 
 const bool DEBUG_AXES = true;
+const double PI = 3.14159;
+const double SQRT_2 = 1.41421;
 
 // Types
 
@@ -422,7 +424,6 @@ int main() {
 
   Model cube = {"cube", vertices, triangles};
 
-  double PI = 3.14159;
   mat4 transform_1 = translation(vec3{-2, 2, 10}) * rotationX(PI / 2) *
                      scaling(vec3{0.5, 0.5, 1});
   mat4 transform_2 = translation(vec3{2, 0, 8}) * rotationZ(PI / 3);
