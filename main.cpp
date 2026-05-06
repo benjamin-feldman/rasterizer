@@ -2,12 +2,12 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <iostream>
 #include <utility>
 #include <vector>
 
 const bool DEBUG_AXES = true;
 const double PI = 3.14159;
-const double SQRT_2 = 1.41421;
 
 // Types
 
@@ -19,6 +19,8 @@ vec2 operator+(vec2 a, vec2 b) { return {a.x + b.x, a.y + b.y}; }
 vec2 operator-(vec2 a, vec2 b) { return {a.x - b.x, a.y - b.y}; }
 vec2 operator*(double s, vec2 a) { return {s * a.x, s * a.y}; }
 
+struct vec4;
+
 struct vec3 {
   union {
     struct {
@@ -28,11 +30,14 @@ struct vec3 {
       double r, g, b;
     };
   };
+
+  vec4 toVec4() const;
 };
 
 vec3 operator+(vec3 a, vec3 b) { return {a.x + b.x, a.y + b.y, a.z + b.z}; }
 vec3 operator-(vec3 a, vec3 b) { return {a.x - b.x, a.y - b.y, a.z - b.z}; }
 vec3 operator*(double s, vec3 a) { return {s * a.x, s * a.y, s * a.z}; }
+vec3 operator/(vec3 a, double s) { return {a.x / s, a.y / s, a.z / s}; }
 
 double dot(vec3 a, vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 vec3 cross(vec3 a, vec3 b) {
@@ -41,7 +46,6 @@ vec3 cross(vec3 a, vec3 b) {
 vec3 normalize(vec3 a) { return (1.0 / sqrt(dot(a, a))) * a; }
 
 using Color = vec3; // r,g,b in [0, 1]
-using Point3 = vec3;
 
 struct Pixel {
   uint8_t r, g, b;
@@ -49,6 +53,8 @@ struct Pixel {
 
 struct vec4 {
   double x, y, z, w;
+
+  vec3 xyz() const { return vec3{x, y, z}; }
 };
 
 struct mat4 {
@@ -76,11 +82,7 @@ vec4 operator*(const mat4 &a, const vec4 &u) {
   return vec4{v[0], v[1], v[2], v[3]};
 }
 
-vec4 toVec4(vec3 v) { return {v.x, v.y, v.z, 1}; }
-
-mat4 identity() {
-  return {{{1, 0, 0, 0}, {0, 1, 0, 0}, {0, 0, 1, 0}, {0, 0, 0, 1}}};
-}
+inline vec4 vec3::toVec4() const { return {x, y, z, 1}; }
 
 mat4 translation(vec3 t) {
   return {{{1, 0, 0, t.x}, {0, 1, 0, t.y}, {0, 0, 1, t.z}, {0, 0, 0, 1}}};
@@ -176,6 +178,11 @@ struct Triangle {
   Color color;
 };
 
+struct Sphere {
+  vec3 center;
+  double r;
+};
+
 struct Model {
   char name[16];
   std::vector<vec4> vertices;
@@ -189,6 +196,175 @@ struct ModelInstance {
   ModelInstance(Model model, mat4 transform)
       : model(model), transform(transform) {}
 };
+
+struct Plane {
+  vec3 normal;
+  double D;
+};
+
+struct ClipTri {
+  // adhoc for the clipping pipeline
+  vec4 v0;
+  vec4 v1;
+  vec4 v2;
+  Color color;
+};
+
+std::vector<ClipTri> triToClipTri(const std::vector<vec4> &vertices,
+                                  const std::vector<Triangle> &triangles,
+                                  const mat4 &transform) {
+  std::vector<ClipTri> clipTriangles;
+  for (auto const &t : triangles) {
+    ClipTri clipTri = {transform * vertices[t.idx[0]],
+                       transform * vertices[t.idx[1]],
+                       transform * vertices[t.idx[2]], t.color};
+    clipTriangles.push_back(clipTri);
+  }
+  return clipTriangles;
+}
+
+struct ClippedInstance {
+  std::vector<ClipTri> triangles;
+};
+
+Sphere getBoundingSphere(const ClippedInstance &instance) {
+  vec3 center;
+  int n = 0;
+  for (const auto &t : instance.triangles) {
+    center = center + t.v0.xyz() + t.v1.xyz() + t.v2.xyz();
+    n += 3;
+  }
+  center = center / n;
+  double r = 0;
+  for (const auto &t : instance.triangles) {
+    double d0 = dot(center - t.v0.xyz(), center - t.v0.xyz());
+    double d1 = dot(center - t.v1.xyz(), center - t.v1.xyz());
+    double d2 = dot(center - t.v2.xyz(), center - t.v2.xyz());
+    if (d0 > r)
+      r = d0;
+    if (d1 > r)
+      r = d1;
+    if (d2 > r)
+      r = d2;
+  }
+  return {center, sqrt(r)};
+}
+
+std::ostream &operator<<(std::ostream &os, vec2 v) {
+  return os << "(" << v.x << ", " << v.y << ")";
+}
+std::ostream &operator<<(std::ostream &os, vec3 v) {
+  return os << "(" << v.x << ", " << v.y << ", " << v.z << ")";
+}
+std::ostream &operator<<(std::ostream &os, vec4 v) {
+  return os << "(" << v.x << ", " << v.y << ", " << v.z << ", " << v.w << ")";
+}
+std::ostream &operator<<(std::ostream &os, const ClipTri &t) {
+  return os << "ClipTri{" << t.v0 << ", " << t.v1 << ", " << t.v2 << "}";
+}
+std::ostream &operator<<(std::ostream &os, const std::vector<ClipTri> &tris) {
+  for (const auto &t : tris)
+    os << t << "\n";
+  return os;
+}
+
+double signedDistance(Plane plane, vec3 vertex) {
+  return dot(plane.normal, vertex) + plane.D;
+}
+
+vec3 intersection(Plane plane, vec3 a, vec3 b) {
+  // intersection between AB and plane (assuming existence of such intersection)
+  double t = (-plane.D - dot(plane.normal, a)) / dot(plane.normal, b - a);
+  return a + t * (b - a);
+}
+
+std::vector<ClipTri> clipTriangle(ClipTri triangle, Plane plane) {
+  vec4 v[3] = {triangle.v0, triangle.v1, triangle.v2};
+  double d[3] = {signedDistance(plane, v[0].xyz()),
+                 signedDistance(plane, v[1].xyz()),
+                 signedDistance(plane, v[2].xyz())};
+  int nPos = (d[0] >= 0) + (d[1] >= 0) + (d[2] >= 0);
+
+  if (nPos == 3)
+    return {triangle};
+  if (nPos == 0)
+    return {};
+
+  if (nPos == 1) {
+    int a = (d[0] >= 0) ? 0 : (d[1] >= 0) ? 1 : 2;
+    int b = (a + 1) % 3, c = (a + 2) % 3;
+    vec3 bp = intersection(plane, v[a].xyz(), v[b].xyz());
+    vec3 cp = intersection(plane, v[a].xyz(), v[c].xyz());
+    return {ClipTri{v[a], bp.toVec4(), cp.toVec4(), triangle.color}};
+  }
+
+  int c = (d[0] < 0) ? 0 : (d[1] < 0) ? 1 : 2;
+  int a = (c + 1) % 3, b = (c + 2) % 3;
+  vec3 ap = intersection(plane, v[a].xyz(), v[c].xyz());
+  vec3 bp = intersection(plane, v[b].xyz(), v[c].xyz());
+  return {ClipTri{v[a], v[b], ap.toVec4(), triangle.color},
+          ClipTri{ap.toVec4(), v[b], bp.toVec4(), triangle.color}};
+}
+
+std::vector<ClipTri>
+clipTrianglesAgainstPlane(const std::vector<ClipTri> &triangles,
+                          const Plane &plane) {
+  std::vector<ClipTri> clippedTriangles;
+  for (auto const &t : triangles) {
+    for (auto const &clippedT : clipTriangle(t, plane)) {
+      clippedTriangles.push_back(clippedT);
+    }
+  }
+  return clippedTriangles;
+}
+
+ClippedInstance *clipInstanceAgainstPlane(const ClippedInstance &instance,
+                                          const Sphere &boundingSphere,
+                                          const Plane &plane) {
+  double d = signedDistance(plane, boundingSphere.center);
+  if (d > boundingSphere.r) {
+    return new ClippedInstance(instance);
+  } else if (d < -boundingSphere.r) {
+    return nullptr;
+  } else {
+    return new ClippedInstance{
+        clipTrianglesAgainstPlane(instance.triangles, plane)};
+  }
+}
+
+ClippedInstance *clipInstance(const ClippedInstance &instance,
+                              const std::vector<Plane> &planes) {
+  Sphere boundingSphere = getBoundingSphere(instance);
+  ClippedInstance *current = new ClippedInstance(instance);
+  for (const auto &p : planes) {
+    ClippedInstance *next =
+        clipInstanceAgainstPlane(*current, boundingSphere, p);
+    delete current;
+    if (next == nullptr)
+      return nullptr;
+    current = next;
+  }
+  return current;
+}
+
+std::vector<ClippedInstance> clipScene(const std::vector<ModelInstance> &scene,
+                                       const std::vector<Plane> &planes,
+                                       const mat4 &cameraMatrix) {
+  std::vector<ClippedInstance> clippedInstances;
+
+  for (auto const &instance : scene) {
+    ClippedInstance initial;
+    initial.triangles =
+        triToClipTri(instance.model.vertices, instance.model.triangles,
+                     cameraMatrix * instance.transform);
+    ClippedInstance *clipped = clipInstance(initial, planes);
+    if (clipped != nullptr) {
+      clippedInstances.push_back(*clipped);
+      delete clipped;
+    }
+  }
+  return clippedInstances;
+}
 
 struct Canvas {
   int Cw, Ch;
@@ -360,49 +536,54 @@ void drawWireframeTriangle(Canvas &c, vec2 p0, vec2 p1, vec2 p2, Color color) {
   drawLine(c, p1, p2, color);
 }
 
-void renderTriangle(Canvas &c, Triangle t,
-                    const std::vector<vec2> &projectedVertices) {
-  drawWireframeTriangle(c, projectedVertices[t.idx[0]],
-                        projectedVertices[t.idx[1]],
-                        projectedVertices[t.idx[2]], t.color);
-}
-
-void renderModel(Canvas &c, const ModelInstance &instance,
-                 mat34 projectionMatrix) {
-  std::vector<vec2> projectedVertices;
-  projectedVertices.reserve(instance.model.vertices.size());
-  mat34 transform = projectionMatrix * instance.transform;
-
-  for (const auto &v : instance.model.vertices) {
-    vec3 projectedVertex = transform * v;
-    vec2 canvasVertex = {projectedVertex.x / projectedVertex.z,
-                         projectedVertex.y / projectedVertex.z};
-    projectedVertices.push_back(canvasVertex);
-  }
-
-  for (const auto &t : instance.model.triangles) {
-    renderTriangle(c, t, projectedVertices);
+void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
+                           const mat34 &projectionMatrix) {
+  for (const auto &t : instance.triangles) {
+    vec3 projected0 = projectionMatrix * t.v0;
+    vec3 projected1 = projectionMatrix * t.v1;
+    vec3 projected2 = projectionMatrix * t.v2;
+    vec2 canvasVertex0 = {projected0.x / projected0.z,
+                          projected0.y / projected0.z};
+    vec2 canvasVertex1 = {projected1.x / projected1.z,
+                          projected1.y / projected1.z};
+    vec2 canvasVertex2 = {projected2.x / projected2.z,
+                          projected2.y / projected2.z};
+    drawWireframeTriangle(c, canvasVertex0, canvasVertex1, canvasVertex2,
+                          t.color);
   }
 }
 
 struct Camera {
   vec3 position;
-  vec3 direction;
+  vec3 target;
 };
 
 void renderScene(Canvas &c, Viewport &vp, Camera camera,
                  const std::vector<ModelInstance> &instances) {
-  mat4 cameraMatrix = lookAt(camera.position, camera.direction);
+  mat4 cameraMatrix = lookAt(camera.position, camera.target);
   mat34 projectionMatrix =
       canvasProjectionMatrix(vp.d, c.Cw, c.Ch, vp.Vw, vp.Vh);
-  mat34 fullProjection = projectionMatrix * cameraMatrix;
-  for (const auto &instance : instances) {
-    renderModel(c, instance, fullProjection);
+
+  double Vw = vp.Vw, Vh = vp.Vh, d = vp.d;
+  double near = 1.0;
+  std::vector<Plane> clippingPlanes = {
+      {vec3{0, 0, 1}, -near},              // near
+      {normalize(vec3{d, 0, Vw / 2}), 0},  // left
+      {normalize(vec3{-d, 0, Vw / 2}), 0}, // right
+      {normalize(vec3{0, d, Vh / 2}), 0},  // bottom
+      {normalize(vec3{0, -d, Vh / 2}), 0}, // top
+  };
+
+  std::vector<ClippedInstance> clippedInstances =
+      clipScene(instances, clippingPlanes, cameraMatrix);
+
+  for (const auto &instance : clippedInstances) {
+    renderClippedInstance(c, instance, projectionMatrix);
   }
 }
 
 int main() {
-  Canvas c(750, 750);
+  Canvas canvas(750, 750);
   Viewport vp(400, 400, 350);
 
   Color red = {1, 0, 0};
@@ -434,8 +615,8 @@ int main() {
 
   Camera camera = {vec3{0, 0, -10}, vec3{2, 1, 1}};
 
-  renderScene(c, vp, camera, scene);
+  renderScene(canvas, vp, camera, scene);
 
-  c.save();
+  canvas.save();
   return 0;
 }
