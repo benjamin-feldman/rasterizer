@@ -2,12 +2,15 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <fstream>
 #include <iostream>
 #include <optional>
+#include <sstream>
+#include <string>
 #include <utility>
 #include <vector>
 
-const bool DEBUG_AXES = true;
+const bool DEBUG_AXES = false;
 const double PI = 3.14159;
 
 // Types
@@ -189,6 +192,39 @@ struct Model {
   std::vector<vec4> vertices;
   std::vector<Triangle> triangles;
 };
+
+Model loadOBJ(const char *path, Color color) {
+  Model model = {};
+  const char *slash = strrchr(path, '/');
+  const char *base = slash ? slash + 1 : path;
+  snprintf(model.name, sizeof(model.name), "%s", base);
+
+  std::ifstream file(path);
+  std::string line;
+  while (std::getline(file, line)) {
+    std::istringstream ss(line);
+    std::string token;
+    ss >> token;
+
+    if (token == "v") {
+      double x, y, z;
+      ss >> x >> y >> z;
+      model.vertices.push_back({x, y, z, 1});
+    } else if (token == "f") {
+      std::vector<int> face;
+      std::string vert;
+      while (ss >> vert) {
+        int idx = std::stoi(vert); // stoi stops at '/', so v/vt/vn just works
+        if (idx < 0)
+          idx = (int)model.vertices.size() + idx + 1;
+        face.push_back(idx - 1); // OBJ is 1-based
+      }
+      for (int i = 1; i + 1 < (int)face.size(); i++)
+        model.triangles.push_back({{face[0], face[i], face[i + 1]}, color});
+    }
+  }
+  return model;
+}
 
 struct ModelInstance {
   Model model;
@@ -376,9 +412,7 @@ struct Canvas {
   }
 
   void putPixelRaw(int x, int y, Pixel pixel) {
-    // (x, y) in screen coordinates
-    assert(x >= 0 && x < Cw);
-    assert(y >= 0 && y < Ch);
+    if (x < 0 || x >= Cw || y < 0 || y >= Ch) return;
     pixels[y * Cw + x] = pixel;
   }
 
@@ -402,8 +436,8 @@ struct Canvas {
     }
   }
 
-  void save() {
-    FILE *f = fopen("out.ppm", "wb");
+  void save(const char *path = "out.ppm") {
+    FILE *f = fopen(path, "wb");
     fprintf(f, "P6\n%d %d\n255\n", Cw, Ch);
     fwrite(pixels.data(), sizeof(Pixel), Cw * Ch, f);
     fclose(f);
@@ -580,7 +614,6 @@ void renderScene(Canvas &c, Viewport &vp, Camera camera,
 }
 
 int main() {
-  Canvas canvas(750, 750);
   Viewport vp(400, 400, 350);
 
   Color red = {1, 0, 0};
@@ -589,6 +622,7 @@ int main() {
   Color yellow = {1, 1, 0};
   Color cyan = {0.17, 1, 1};
   Color purple = {.5, .5, .5};
+  Color black = {0, 0, 0};
 
   std::vector<vec4> vertices = {{1, 1, 1, 1},    {-1, 1, 1, 1}, {-1, -1, 1, 1},
                                 {1, -1, 1, 1},   {1, 1, -1, 1}, {-1, 1, -1, 1},
@@ -608,12 +642,15 @@ int main() {
   ModelInstance cube_1(cube, transform_1);
   ModelInstance cube_2(cube, transform_2);
 
-  std::vector<ModelInstance> scene = {cube_1, cube_2};
+  Model head = loadOBJ("head.OBJ", black);
+  double s = 10;
+  mat4 headTransform = translation(vec3{2.5, 1.5, -5}) * rotationY(PI/2) * scaling({s, s, s});
 
   Camera camera = {vec3{0, 0, -10}, vec3{2, 1, 1}};
 
+  Canvas canvas(750, 750);
+  std::vector<ModelInstance> scene = {ModelInstance(head, headTransform)};
   renderScene(canvas, vp, camera, scene);
-
   canvas.save();
   return 0;
 }
