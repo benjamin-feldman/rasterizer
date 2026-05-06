@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <iostream>
+#include <optional>
 #include <utility>
 #include <vector>
 
@@ -318,31 +319,29 @@ clipTrianglesAgainstPlane(const std::vector<ClipTri> &triangles,
   return clippedTriangles;
 }
 
-ClippedInstance *clipInstanceAgainstPlane(const ClippedInstance &instance,
-                                          const Sphere &boundingSphere,
-                                          const Plane &plane) {
+std::optional<ClippedInstance>
+clipInstanceAgainstPlane(const ClippedInstance &instance,
+                         const Sphere &boundingSphere, const Plane &plane) {
   double d = signedDistance(plane, boundingSphere.center);
   if (d > boundingSphere.r) {
-    return new ClippedInstance(instance);
+    return instance;
   } else if (d < -boundingSphere.r) {
-    return nullptr;
+    return std::nullopt;
   } else {
-    return new ClippedInstance{
+    return ClippedInstance{
         clipTrianglesAgainstPlane(instance.triangles, plane)};
   }
 }
 
-ClippedInstance *clipInstance(const ClippedInstance &instance,
-                              const std::vector<Plane> &planes) {
+std::optional<ClippedInstance> clipInstance(const ClippedInstance &instance,
+                                            const std::vector<Plane> &planes) {
   Sphere boundingSphere = getBoundingSphere(instance);
-  ClippedInstance *current = new ClippedInstance(instance);
+  ClippedInstance current = instance;
   for (const auto &p : planes) {
-    ClippedInstance *next =
-        clipInstanceAgainstPlane(*current, boundingSphere, p);
-    delete current;
-    if (next == nullptr)
-      return nullptr;
-    current = next;
+    auto next = clipInstanceAgainstPlane(current, boundingSphere, p);
+    if (!next)
+      return std::nullopt;
+    current = std::move(*next);
   }
   return current;
 }
@@ -357,10 +356,8 @@ std::vector<ClippedInstance> clipScene(const std::vector<ModelInstance> &scene,
     initial.triangles =
         triToClipTri(instance.model.vertices, instance.model.triangles,
                      cameraMatrix * instance.transform);
-    ClippedInstance *clipped = clipInstance(initial, planes);
-    if (clipped != nullptr) {
-      clippedInstances.push_back(*clipped);
-      delete clipped;
+    if (auto clipped = clipInstance(initial, planes)) {
+      clippedInstances.push_back(std::move(*clipped));
     }
   }
   return clippedInstances;
