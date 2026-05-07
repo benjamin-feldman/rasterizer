@@ -171,12 +171,16 @@ Pixel toPixel(Color c) {
   };
 }
 
+// indices into ScreenVertex::attrs
+constexpr int ATTR_H = 0;
+constexpr int ATTR_DEPTH = 1;
+constexpr int N_ATTRS = 2;
+
 struct ScreenVertex {
   vec2 pos;
-  double h;
-  double depth;
-  ScreenVertex(vec2 pos, double h, double depth)
-      : pos(pos), h(h), depth(depth) {}
+  std::vector<double> attrs; // size = N_ATTRS
+  ScreenVertex(vec2 pos, std::vector<double> attrs)
+      : pos(pos), attrs(std::move(attrs)) {}
 };
 
 struct Triangle {
@@ -520,6 +524,34 @@ void drawLine(Canvas &c, vec2 p0, vec2 p1, Color color) {
   }
 }
 
+// One edge of the triangle, sampled per-scanline
+// xs[i] is x at row y0 + i; attrs[a][i] is attribute a at the same row
+struct Edge {
+  std::vector<double> xs;
+  std::vector<std::vector<double>> attrs;
+};
+
+Edge interpEdge(const ScreenVertex &p0, const ScreenVertex &p1) {
+  Edge e;
+  e.xs = interpolate(p0.pos.y, p0.pos.x, p1.pos.y, p1.pos.x);
+  e.attrs.reserve(N_ATTRS);
+  for (int a = 0; a < N_ATTRS; a++)
+    e.attrs.push_back(
+        interpolate(p0.pos.y, p0.attrs[a], p1.pos.y, p1.attrs[a]));
+  return e;
+}
+
+// Concatenate top->mid then mid->bot, dropping the duplicated shared row.
+Edge concatEdges(Edge a, const Edge &b) {
+  a.xs.pop_back();
+  a.xs.insert(a.xs.end(), b.xs.begin(), b.xs.end());
+  for (size_t i = 0; i < a.attrs.size(); i++) {
+    a.attrs[i].pop_back();
+    a.attrs[i].insert(a.attrs[i].end(), b.attrs[i].begin(), b.attrs[i].end());
+  }
+  return a;
+}
+
 void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
                         ScreenVertex p2, Color color) {
   if (p1.pos.y < p0.pos.y)
@@ -529,77 +561,30 @@ void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
   if (p2.pos.y < p1.pos.y)
     std::swap(p2, p1);
 
-  std::vector<double> x01 = interpolate(p0.pos.y, p0.pos.x, p1.pos.y, p1.pos.x);
-  std::vector<double> h01 = interpolate(p0.pos.y, p0.h, p1.pos.y, p1.h);
-  std::vector<double> d01 = interpolate(p0.pos.y, p0.depth, p1.pos.y, p1.depth);
-  std::vector<double> x12 = interpolate(p1.pos.y, p1.pos.x, p2.pos.y, p2.pos.x);
-  std::vector<double> h12 = interpolate(p1.pos.y, p1.h, p2.pos.y, p2.h);
-  std::vector<double> d12 = interpolate(p1.pos.y, p1.depth, p2.pos.y, p2.depth);
-  std::vector<double> x02 = interpolate(p0.pos.y, p0.pos.x, p2.pos.y, p2.pos.x);
-  std::vector<double> h02 = interpolate(p0.pos.y, p0.h, p2.pos.y, p2.h);
-  std::vector<double> d02 = interpolate(p0.pos.y, p0.depth, p2.pos.y, p2.depth);
+  Edge shortEdge = concatEdges(interpEdge(p0, p1), interpEdge(p1, p2));
+  Edge longEdge = interpEdge(p0, p2);
 
-  x01.pop_back();
-  std::vector<double> x012;
-  x012.reserve(x01.size() + x12.size());
-  x012.insert(x012.end(), x01.begin(), x01.end());
-  x012.insert(x012.end(), x12.begin(), x12.end());
-
-  h01.pop_back();
-  std::vector<double> h012;
-  h012.reserve(h01.size() + h12.size());
-  h012.insert(h012.end(), h01.begin(), h01.end());
-  h012.insert(h012.end(), h12.begin(), h12.end());
-
-  d01.pop_back();
-  std::vector<double> d012;
-  d012.reserve(d01.size() + d12.size());
-  d012.insert(d012.end(), d01.begin(), d01.end());
-  d012.insert(d012.end(), d12.begin(), d12.end());
-
-  int m = x012.size() / 2;
-
-  std::vector<double> x_left;
-  std::vector<double> x_right;
-  std::vector<double> h_left;
-  std::vector<double> h_right;
-  std::vector<double> d_left;
-  std::vector<double> d_right;
-
-  if (x02[m] < x012[m]) {
-    x_left = x02;
-    h_left = h02;
-    d_left = d02;
-
-    x_right = x012;
-    h_right = h012;
-    d_right = d012;
-  } else {
-    x_left = x012;
-    h_left = h012;
-    d_left = d012;
-
-    x_right = x02;
-    h_right = h02;
-    d_right = d02;
-  }
+  int m = shortEdge.xs.size() / 2;
+  bool longIsLeft = longEdge.xs[m] < shortEdge.xs[m];
+  Edge &left = longIsLeft ? longEdge : shortEdge;
+  Edge &right = longIsLeft ? shortEdge : longEdge;
 
   for (int y = p0.pos.y; y <= p2.pos.y; y++) {
-    int x_l = (int)x_left[y - p0.pos.y];
-    int x_r = (int)x_right[y - p0.pos.y];
+    int row = y - p0.pos.y;
+    int x_l = (int)left.xs[row];
+    int x_r = (int)right.xs[row];
 
-    std::vector<double> h_segment =
-        interpolate(x_l, h_left[y - p0.pos.y], x_r, h_right[y - p0.pos.y]);
-
-    std::vector<double> d_segment =
-        interpolate(x_l, d_left[y - p0.pos.y], x_r, d_right[y - p0.pos.y]);
+    std::vector<std::vector<double>> segs;
+    segs.reserve(N_ATTRS);
+    for (int a = 0; a < N_ATTRS; a++)
+      segs.push_back(
+          interpolate(x_l, left.attrs[a][row], x_r, right.attrs[a][row]));
 
     for (int x = x_l; x <= x_r; x++) {
-      float h = h_segment[x - x_l];
-      float d = d_segment[x - x_l];
+      double h = segs[ATTR_H][x - x_l];
+      double d = segs[ATTR_DEPTH][x - x_l];
       if (d > c.getDepth(x, y)) {
-        Pixel shaded_pixel = toPixel(h * color);
-        c.putPixel(x, y, shaded_pixel);
+        c.putPixel(x, y, toPixel(h * color));
         c.putDepth(x, y, d);
       }
     }
@@ -628,9 +613,9 @@ void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
                           projected1.y / projected1.z};
     vec2 canvasVertex2 = {projected2.x / projected2.z,
                           projected2.y / projected2.z};
-    ScreenVertex screenVertex0(canvasVertex0, 1, 1 / projected0.z);
-    ScreenVertex screenVertex1(canvasVertex1, 1, 1 / projected1.z);
-    ScreenVertex screenVertex2(canvasVertex2, 1, 1 / projected2.z);
+    ScreenVertex screenVertex0(canvasVertex0, {1.0, 1.0 / projected0.z});
+    ScreenVertex screenVertex1(canvasVertex1, {1.0, 1.0 / projected1.z});
+    ScreenVertex screenVertex2(canvasVertex2, {1.0, 1.0 / projected2.z});
     drawShadedTriangle(c, screenVertex0, screenVertex1, screenVertex2, t.color);
   }
 }
