@@ -12,7 +12,6 @@
 
 const bool DEBUG_AXES = false;
 const double PI = 3.14159;
-const double INF = 1.7976931348623157e+308;
 
 // Types
 
@@ -411,7 +410,7 @@ struct Canvas {
   std::vector<double> depths;
 
   Canvas(int w, int h)
-      : Cw(w), Ch(h), pixels(w * h, Pixel{255, 255, 255}), depths(w * h, INF) {
+      : Cw(w), Ch(h), pixels(w * h, Pixel{255, 255, 255}), depths(w * h, 0) {
     if (DEBUG_AXES)
       drawAxis();
   }
@@ -598,7 +597,7 @@ void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
     for (int x = x_l; x <= x_r; x++) {
       float h = h_segment[x - x_l];
       float d = d_segment[x - x_l];
-      if (d < c.getDepth(x, y)) {
+      if (d > c.getDepth(x, y)) {
         Pixel shaded_pixel = toPixel(h * color);
         c.putPixel(x, y, shaded_pixel);
         c.putDepth(x, y, d);
@@ -625,9 +624,9 @@ void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
                           projected1.y / projected1.z};
     vec2 canvasVertex2 = {projected2.x / projected2.z,
                           projected2.y / projected2.z};
-    ScreenVertex screenVertex0(canvasVertex0, 1, projected0.z);
-    ScreenVertex screenVertex1(canvasVertex1, 1, projected1.z);
-    ScreenVertex screenVertex2(canvasVertex2, 1, projected2.z);
+    ScreenVertex screenVertex0(canvasVertex0, 1, 1 / projected0.z);
+    ScreenVertex screenVertex1(canvasVertex1, 1, 1 / projected1.z);
+    ScreenVertex screenVertex2(canvasVertex2, 1, 1 / projected2.z);
     drawShadedTriangle(c, screenVertex0, screenVertex1, screenVertex2, t.color);
   }
 }
