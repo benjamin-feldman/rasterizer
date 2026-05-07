@@ -10,8 +10,13 @@
 #include <utility>
 #include <vector>
 
-const bool DEBUG_AXES = false;
-const double PI = 3.14159;
+constexpr bool DEBUG_AXES = false;
+constexpr double PI = 3.14159;
+
+// indices into ScreenVertex::attrs
+constexpr int ATTR_H = 0;
+constexpr int ATTR_DEPTH = 1;
+constexpr int N_ATTRS = 2;
 
 // Types
 
@@ -170,11 +175,6 @@ Pixel toPixel(Color c) {
       static_cast<uint8_t>(clamp(c.b, 0.0, 1.0) * 255),
   };
 }
-
-// indices into ScreenVertex::attrs
-constexpr int ATTR_H = 0;
-constexpr int ATTR_DEPTH = 1;
-constexpr int N_ATTRS = 2;
 
 struct ScreenVertex {
   vec2 pos;
