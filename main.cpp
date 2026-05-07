@@ -12,6 +12,7 @@
 
 const bool DEBUG_AXES = false;
 const double PI = 3.14159;
+const double INF = 1.7976931348623157e+308;
 
 // Types
 
@@ -174,7 +175,9 @@ Pixel toPixel(Color c) {
 struct ScreenVertex {
   vec2 pos;
   double h;
-  ScreenVertex(vec2 pos, double h) : pos(pos), h(h) {}
+  double depth;
+  ScreenVertex(vec2 pos, double h, double depth)
+      : pos(pos), h(h), depth(depth) {}
 };
 
 struct Triangle {
@@ -401,18 +404,21 @@ std::vector<ClippedInstance> clipScene(const std::vector<ModelInstance> &scene,
 
 struct Canvas {
   int Cw, Ch;
-
   // Contiguous list of pixels
   // pixel (x, y) is at pixels[y*width + x]
   std::vector<Pixel> pixels;
+  // same for depths
+  std::vector<double> depths;
 
-  Canvas(int w, int h) : Cw(w), Ch(h), pixels(w * h, Pixel{255, 255, 255}) {
+  Canvas(int w, int h)
+      : Cw(w), Ch(h), pixels(w * h, Pixel{255, 255, 255}), depths(w * h, INF) {
     if (DEBUG_AXES)
       drawAxis();
   }
 
   void putPixelRaw(int x, int y, Pixel pixel) {
-    if (x < 0 || x >= Cw || y < 0 || y >= Ch) return;
+    if (x < 0 || x >= Cw || y < 0 || y >= Ch)
+      return;
     pixels[y * Cw + x] = pixel;
   }
 
@@ -421,6 +427,24 @@ struct Canvas {
     int sx = Cw / 2 + x;
     int sy = Ch / 2 - y;
     putPixelRaw(sx, sy, pixel);
+  }
+
+  void putDepthRaw(int x, int y, double depth) {
+    if (x < 0 || x >= Cw || y < 0 || y >= Ch)
+      return;
+    depths[y * Cw + x] = depth;
+  }
+
+  void putDepth(int x, int y, double depth) {
+    int sx = Cw / 2 + x;
+    int sy = Ch / 2 - y;
+    putDepthRaw(sx, sy, depth);
+  }
+
+  double getDepth(int x, int y) {
+    int sx = Cw / 2 + x;
+    int sy = Ch / 2 - y;
+    return depths[sy * Cw + sx];
   }
 
   void drawAxis() {
@@ -508,10 +532,13 @@ void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
 
   std::vector<double> x01 = interpolate(p0.pos.y, p0.pos.x, p1.pos.y, p1.pos.x);
   std::vector<double> h01 = interpolate(p0.pos.y, p0.h, p1.pos.y, p1.h);
+  std::vector<double> d01 = interpolate(p0.pos.y, p0.depth, p1.pos.y, p1.depth);
   std::vector<double> x12 = interpolate(p1.pos.y, p1.pos.x, p2.pos.y, p2.pos.x);
   std::vector<double> h12 = interpolate(p1.pos.y, p1.h, p2.pos.y, p2.h);
+  std::vector<double> d12 = interpolate(p1.pos.y, p1.depth, p2.pos.y, p2.depth);
   std::vector<double> x02 = interpolate(p0.pos.y, p0.pos.x, p2.pos.y, p2.pos.x);
   std::vector<double> h02 = interpolate(p0.pos.y, p0.h, p2.pos.y, p2.h);
+  std::vector<double> d02 = interpolate(p0.pos.y, p0.depth, p2.pos.y, p2.depth);
 
   x01.pop_back();
   std::vector<double> x012;
@@ -525,25 +552,37 @@ void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
   h012.insert(h012.end(), h01.begin(), h01.end());
   h012.insert(h012.end(), h12.begin(), h12.end());
 
+  d01.pop_back();
+  std::vector<double> d012;
+  d012.reserve(d01.size() + d12.size());
+  d012.insert(d012.end(), d01.begin(), d01.end());
+  d012.insert(d012.end(), d12.begin(), d12.end());
+
   int m = x012.size() / 2;
 
   std::vector<double> x_left;
   std::vector<double> x_right;
   std::vector<double> h_left;
   std::vector<double> h_right;
+  std::vector<double> d_left;
+  std::vector<double> d_right;
 
   if (x02[m] < x012[m]) {
     x_left = x02;
     h_left = h02;
+    d_left = d02;
 
     x_right = x012;
     h_right = h012;
+    d_right = d012;
   } else {
     x_left = x012;
     h_left = h012;
+    d_left = d012;
 
     x_right = x02;
     h_right = h02;
+    d_right = d02;
   }
 
   for (int y = p0.pos.y; y <= p2.pos.y; y++) {
@@ -553,10 +592,17 @@ void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
     std::vector<double> h_segment =
         interpolate(x_l, h_left[y - p0.pos.y], x_r, h_right[y - p0.pos.y]);
 
+    std::vector<double> d_segment =
+        interpolate(x_l, d_left[y - p0.pos.y], x_r, d_right[y - p0.pos.y]);
+
     for (int x = x_l; x <= x_r; x++) {
       float h = h_segment[x - x_l];
-      Pixel shaded_pixel = toPixel(h * color);
-      c.putPixel(x, y, shaded_pixel);
+      float d = d_segment[x - x_l];
+      if (d < c.getDepth(x, y)) {
+        Pixel shaded_pixel = toPixel(h * color);
+        c.putPixel(x, y, shaded_pixel);
+        c.putDepth(x, y, d);
+      }
     }
   }
 }
@@ -579,8 +625,10 @@ void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
                           projected1.y / projected1.z};
     vec2 canvasVertex2 = {projected2.x / projected2.z,
                           projected2.y / projected2.z};
-    drawWireframeTriangle(c, canvasVertex0, canvasVertex1, canvasVertex2,
-                          t.color);
+    ScreenVertex screenVertex0(canvasVertex0, 1, projected0.z);
+    ScreenVertex screenVertex1(canvasVertex1, 1, projected1.z);
+    ScreenVertex screenVertex2(canvasVertex2, 1, projected2.z);
+    drawShadedTriangle(c, screenVertex0, screenVertex1, screenVertex2, t.color);
   }
 }
 
@@ -623,6 +671,7 @@ int main() {
   Color cyan = {0.17, 1, 1};
   Color purple = {.5, .5, .5};
   Color black = {0, 0, 0};
+  Color white = {1, 1, 1};
 
   std::vector<vec4> vertices = {{1, 1, 1, 1},    {-1, 1, 1, 1}, {-1, -1, 1, 1},
                                 {1, -1, 1, 1},   {1, 1, -1, 1}, {-1, 1, -1, 1},
@@ -636,20 +685,23 @@ int main() {
 
   Model cube = {"cube", vertices, triangles};
 
-  mat4 transform_1 = translation(vec3{-2, 2, 10}) * rotationX(PI / 2) *
-                     scaling(vec3{0.5, 0.5, 1});
-  mat4 transform_2 = translation(vec3{2, 0, 8}) * rotationZ(PI / 3);
+  mat4 transform_1 = translation(vec3{-1, 2, 7}) * rotationX(PI / 3) *
+                     scaling(vec3{0.5, 0.5, 0.5});
+  mat4 transform_2 = translation(vec3{0, 0, -6}) * scaling({0.3, 0.3, 0.3}) *
+                     rotationY(PI / 6) * rotationZ(PI / 6) * rotationX(PI / 4);
   ModelInstance cube_1(cube, transform_1);
   ModelInstance cube_2(cube, transform_2);
 
-  Model head = loadOBJ("head.OBJ", black);
+  Model head = loadOBJ("head.OBJ", red);
   double s = 10;
-  mat4 headTransform = translation(vec3{2.5, 1.5, -5}) * rotationY(PI/2) * scaling({s, s, s});
+  mat4 headTransform = translation(vec3{2.5, 1.5, -5}) *
+                       rotationY(1.9 * PI / 2) * scaling({s, s, s});
 
   Camera camera = {vec3{0, 0, -10}, vec3{2, 1, 1}};
 
-  Canvas canvas(750, 750);
-  std::vector<ModelInstance> scene = {ModelInstance(head, headTransform)};
+  Canvas canvas(1000, 1000);
+  std::vector<ModelInstance> scene = {ModelInstance(head, headTransform),
+                                      cube_1, cube_2};
   renderScene(canvas, vp, camera, scene);
   canvas.save();
   return 0;
