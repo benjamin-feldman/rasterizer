@@ -615,6 +615,10 @@ void drawWireframeTriangle(Canvas &c, vec2 p0, vec2 p1, vec2 p2, Color color) {
 void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
                            const mat34 &projectionMatrix) {
   for (const auto &t : instance.triangles) {
+    vec3 normal = cross(t.v1.xyz() - t.v0.xyz(), t.v2.xyz() - t.v0.xyz());
+    if (dot(normal, t.v0.xyz()) >= 0)
+      continue;
+
     vec3 projected0 = projectionMatrix * t.v0;
     vec3 projected1 = projectionMatrix * t.v1;
     vec3 projected2 = projectionMatrix * t.v2;
