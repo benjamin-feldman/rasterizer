@@ -176,6 +176,16 @@ Pixel toPixel(Color c) {
   };
 }
 
+enum LightType {
+    POINT, DIRECTIONAL, AMBIENT
+};
+
+struct Light {
+    LightType source;
+    vec4 position;
+    vec4 direction;
+};
+
 struct ScreenVertex {
   vec2 pos;
   std::vector<double> attrs; // size = N_ATTRS
@@ -251,6 +261,11 @@ struct ClipTri {
   vec4 v1;
   vec4 v2;
   Color color;
+};
+
+struct Scene {
+    std::vector<ModelInstance> instances;
+    std::vector<Light> lights;
 };
 
 std::vector<ClipTri> triToClipTri(const std::vector<vec4> &vertices,
@@ -388,12 +403,12 @@ std::optional<ClippedInstance> clipInstance(const ClippedInstance &instance,
   return current;
 }
 
-std::vector<ClippedInstance> clipScene(const std::vector<ModelInstance> &scene,
+std::vector<ClippedInstance> clipScene(const Scene &scene,
                                        const std::vector<Plane> &planes,
                                        const mat4 &cameraMatrix) {
   std::vector<ClippedInstance> clippedInstances;
 
-  for (auto const &instance : scene) {
+  for (auto const &instance : scene.instances) {
     ClippedInstance initial;
     initial.triangles =
         triToClipTri(instance.model.vertices, instance.model.triangles,
@@ -626,7 +641,7 @@ struct Camera {
 };
 
 void renderScene(Canvas &c, Viewport &vp, Camera camera,
-                 const std::vector<ModelInstance> &instances) {
+                 const Scene &scene) {
   mat4 cameraMatrix = lookAt(camera.position, camera.target);
   mat34 projectionMatrix =
       canvasProjectionMatrix(vp.d, c.Cw, c.Ch, vp.Vw, vp.Vh);
@@ -642,7 +657,7 @@ void renderScene(Canvas &c, Viewport &vp, Camera camera,
   };
 
   std::vector<ClippedInstance> clippedInstances =
-      clipScene(instances, clippingPlanes, cameraMatrix);
+      clipScene(scene, clippingPlanes, cameraMatrix);
 
   for (const auto &instance : clippedInstances) {
     renderClippedInstance(c, instance, projectionMatrix);
@@ -688,8 +703,8 @@ int main() {
   Camera camera = {vec3{0, 0, -10}, vec3{2, 1, 1}};
 
   Canvas canvas(1000, 1000);
-  std::vector<ModelInstance> scene = {ModelInstance(head, headTransform),
-                                      cube_1, cube_2};
+  Scene scene = {{ModelInstance(head, headTransform),
+                                      cube_1, cube_2}, {}};
   renderScene(canvas, vp, camera, scene);
   canvas.save();
   return 0;
