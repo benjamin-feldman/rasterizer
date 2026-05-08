@@ -1,5 +1,6 @@
 #include <cassert>
 #include <cmath>
+#include <complex>
 #include <cstdint>
 #include <cstdio>
 #include <fstream>
@@ -53,6 +54,7 @@ vec3 cross(vec3 a, vec3 b) {
   return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
 vec3 normalize(vec3 a) { return (1.0 / sqrt(dot(a, a))) * a; }
+double norm2(vec3 a) { return sqrt(dot(a, a)); }
 
 using Color = vec3; // r,g,b in [0, 1]
 
@@ -176,15 +178,46 @@ Pixel toPixel(Color c) {
   };
 }
 
-enum LightType {
-    POINT, DIRECTIONAL, AMBIENT
-};
+enum LightType { POINT, DIRECTIONAL, AMBIENT };
 
 struct Light {
-    LightType source;
-    vec4 position;
-    vec4 direction;
+  LightType sourceType;
+  vec3 position;
+  vec3 direction;
+  double intensity;
 };
+
+double computeLighting(const vec3 &p, const vec3 &normal,
+                       const vec3 &cameraDirection,
+                       const std::vector<Light> &lights, double s) {
+  double illumination = 0;
+
+  for (const Light &light : lights) {
+    if (light.sourceType == AMBIENT) {
+      illumination += light.intensity;
+      continue;
+    }
+    vec3 L = (light.sourceType == POINT) ? light.position - p : light.direction;
+
+    // Diffuse
+    double nDotL = dot(normal, L);
+    if (nDotL > 0) {
+      illumination += light.intensity * nDotL / (norm2(normal) * norm2(L));
+    }
+
+    // Specular
+    if (s != -1) {
+      vec3 R = 2 * nDotL * normal - L;
+      double rDotV = dot(R, cameraDirection);
+
+      if (rDotV > 0) {
+        illumination += light.intensity *
+                        pow(rDotV / (norm2(R) * norm2(cameraDirection)), s);
+      }
+    }
+  }
+  return illumination;
+}
 
 struct ScreenVertex {
   vec2 pos;
@@ -196,6 +229,7 @@ struct ScreenVertex {
 struct Triangle {
   int idx[3];
   Color color;
+  double specularity;
 };
 
 struct Sphere {
@@ -209,7 +243,7 @@ struct Model {
   std::vector<Triangle> triangles;
 };
 
-Model loadOBJ(const char *path, Color color) {
+Model loadOBJ(const char *path, Color color, double specularity) {
   Model model = {};
   const char *slash = strrchr(path, '/');
   const char *base = slash ? slash + 1 : path;
@@ -236,7 +270,8 @@ Model loadOBJ(const char *path, Color color) {
         face.push_back(idx - 1); // OBJ is 1-based
       }
       for (int i = 1; i + 1 < (int)face.size(); i++)
-        model.triangles.push_back({{face[0], face[i], face[i + 1]}, color});
+        model.triangles.push_back(
+            {{face[0], face[i], face[i + 1]}, color, specularity});
     }
   }
   return model;
@@ -261,11 +296,12 @@ struct ClipTri {
   vec4 v1;
   vec4 v2;
   Color color;
+  double specularity;
 };
 
 struct Scene {
-    std::vector<ModelInstance> instances;
-    std::vector<Light> lights;
+  std::vector<ModelInstance> instances;
+  std::vector<Light> lights;
 };
 
 std::vector<ClipTri> triToClipTri(const std::vector<vec4> &vertices,
@@ -275,7 +311,7 @@ std::vector<ClipTri> triToClipTri(const std::vector<vec4> &vertices,
   for (auto const &t : triangles) {
     ClipTri clipTri = {transform * vertices[t.idx[0]],
                        transform * vertices[t.idx[1]],
-                       transform * vertices[t.idx[2]], t.color};
+                       transform * vertices[t.idx[2]], t.color, t.specularity};
     clipTriangles.push_back(clipTri);
   }
   return clipTriangles;
@@ -353,7 +389,7 @@ std::vector<ClipTri> clipTriangle(ClipTri triangle, Plane plane) {
     int b = (a + 1) % 3, c = (a + 2) % 3;
     vec3 bp = intersection(plane, v[a].xyz(), v[b].xyz());
     vec3 cp = intersection(plane, v[a].xyz(), v[c].xyz());
-    return {ClipTri{v[a], bp.toVec4(), cp.toVec4(), triangle.color}};
+    return {ClipTri{v[a], bp.toVec4(), cp.toVec4(), triangle.color, triangle.specularity}};
   }
 
   int c = (d[0] < 0) ? 0 : (d[1] < 0) ? 1 : 2;
@@ -361,7 +397,7 @@ std::vector<ClipTri> clipTriangle(ClipTri triangle, Plane plane) {
   vec3 ap = intersection(plane, v[a].xyz(), v[c].xyz());
   vec3 bp = intersection(plane, v[b].xyz(), v[c].xyz());
   return {ClipTri{v[a], v[b], ap.toVec4(), triangle.color},
-          ClipTri{ap.toVec4(), v[b], bp.toVec4(), triangle.color}};
+          ClipTri{ap.toVec4(), v[b], bp.toVec4(), triangle.color, triangle.specularity}};
 }
 
 std::vector<ClipTri>
@@ -613,11 +649,15 @@ void drawWireframeTriangle(Canvas &c, vec2 p0, vec2 p1, vec2 p2, Color color) {
 }
 
 void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
-                           const mat34 &projectionMatrix) {
+                           const mat34 &projectionMatrix,
+                           const std::vector<Light> lights) {
   for (const auto &t : instance.triangles) {
+    // backface culling
     vec3 normal = cross(t.v1.xyz() - t.v0.xyz(), t.v2.xyz() - t.v0.xyz());
     if (dot(normal, t.v0.xyz()) >= 0)
       continue;
+
+    vec3 barycentre = (1. / 3.) * (t.v0.xyz() + t.v1.xyz() + t.v2.xyz());
 
     vec3 projected0 = projectionMatrix * t.v0;
     vec3 projected1 = projectionMatrix * t.v1;
@@ -628,9 +668,14 @@ void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
                           projected1.y / projected1.z};
     vec2 canvasVertex2 = {projected2.x / projected2.z,
                           projected2.y / projected2.z};
-    ScreenVertex screenVertex0(canvasVertex0, {1.0, 1.0 / projected0.z});
-    ScreenVertex screenVertex1(canvasVertex1, {1.0, 1.0 / projected1.z});
-    ScreenVertex screenVertex2(canvasVertex2, {1.0, 1.0 / projected2.z});
+    double illumination =
+        computeLighting(barycentre, normal, barycentre, lights, t.specularity);
+    ScreenVertex screenVertex0(canvasVertex0,
+                               {illumination, 1.0 / projected0.z});
+    ScreenVertex screenVertex1(canvasVertex1,
+                               {illumination, 1.0 / projected1.z});
+    ScreenVertex screenVertex2(canvasVertex2,
+                               {illumination, 1.0 / projected2.z});
     drawShadedTriangle(c, screenVertex0, screenVertex1, screenVertex2, t.color);
   }
 }
@@ -640,11 +685,32 @@ struct Camera {
   vec3 target;
 };
 
-void renderScene(Canvas &c, Viewport &vp, Camera camera,
-                 const Scene &scene) {
+Light transformLight(const Light &light, const mat4 &cameraMatrix) {
+  Light out = light;
+  if (light.sourceType == POINT) {
+    vec4 p = cameraMatrix *
+             vec4{light.position.x, light.position.y, light.position.z, 1};
+    out.position = p.xyz();
+  } else if (light.sourceType == DIRECTIONAL) {
+    vec4 d = cameraMatrix *
+             vec4{light.direction.x, light.direction.y, light.direction.z, 0};
+    // here this is only a rotation thanks to w=0, because the cameraMatrix
+    // passed is a lookAt matrix made of only translation+rotation, and we're
+    // cancelling the rotation with w=0
+    out.direction = d.xyz();
+  }
+  return out;
+}
+
+void renderScene(Canvas &c, Viewport &vp, Camera camera, const Scene &scene) {
   mat4 cameraMatrix = lookAt(camera.position, camera.target);
   mat34 projectionMatrix =
       canvasProjectionMatrix(vp.d, c.Cw, c.Ch, vp.Vw, vp.Vh);
+
+  std::vector<Light> cameraLights;
+  cameraLights.reserve(scene.lights.size());
+  for (const Light &l : scene.lights)
+    cameraLights.push_back(transformLight(l, cameraMatrix));
 
   double Vw = vp.Vw, Vh = vp.Vh, d = vp.d;
   double near = 1.0;
@@ -660,7 +726,7 @@ void renderScene(Canvas &c, Viewport &vp, Camera camera,
       clipScene(scene, clippingPlanes, cameraMatrix);
 
   for (const auto &instance : clippedInstances) {
-    renderClippedInstance(c, instance, projectionMatrix);
+    renderClippedInstance(c, instance, projectionMatrix, cameraLights);
   }
 }
 
@@ -695,16 +761,18 @@ int main() {
   ModelInstance cube_1(cube, transform_1);
   ModelInstance cube_2(cube, transform_2);
 
-  Model head = loadOBJ("head.OBJ", red);
+  Model head = loadOBJ("head.OBJ", red, 0);
   double s = 10;
   mat4 headTransform = translation(vec3{2.5, 1.5, -5}) *
                        rotationY(1.9 * PI / 2) * scaling({s, s, s});
 
   Camera camera = {vec3{0, 0, -10}, vec3{2, 1, 1}};
-
-  Canvas canvas(1000, 1000);
-  Scene scene = {{ModelInstance(head, headTransform),
-                                      cube_1, cube_2}, {}};
+  int canvasSize = 800;
+  Canvas canvas(canvasSize, canvasSize);
+  Light sun = {DIRECTIONAL, {0, 10, -3}, {0.3, 1, 0}, 2};
+  Light ambient = {AMBIENT, {}, {}, 0.7};
+  Scene scene = {{ModelInstance(head, headTransform), cube_1, cube_2},
+                 {sun, ambient}};
   renderScene(canvas, vp, camera, scene);
   canvas.save();
   return 0;
