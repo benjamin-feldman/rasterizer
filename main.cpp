@@ -206,7 +206,7 @@ double computeLighting(const vec3 &p, const vec3 &normal,
     }
 
     // Specular
-    if (s != -1) {
+    if (s != -1 and nDotL > 0) {
       vec3 R = 2 * nDotL * normal - L;
       double rDotV = dot(R, cameraDirection);
 
@@ -672,7 +672,7 @@ void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
                            const std::vector<Light> lights) {
   for (const auto &t : instance.triangles) {
     // backface culling
-    vec3 normal = cross(t.v1.xyz() - t.v0.xyz(), t.v2.xyz() - t.v0.xyz());
+    vec3 normal = normalize(cross(t.v1.xyz() - t.v0.xyz(), t.v2.xyz() - t.v0.xyz()));
     if (dot(normal, t.v0.xyz()) >= 0)
       continue;
 
