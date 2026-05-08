@@ -545,6 +545,14 @@ struct Viewport {
   Viewport(int w, int h, double d) : Vw(w), Vh(h), d(d) {};
 };
 
+int rasterCoord(double x) { return static_cast<int>(std::lround(x)); }
+
+ScreenVertex snapToRaster(ScreenVertex p) {
+  p.pos.x = rasterCoord(p.pos.x);
+  p.pos.y = rasterCoord(p.pos.y);
+  return p;
+}
+
 std::vector<double> interpolate(int i0, double d0, int i1, double d1) {
 
   // interpolate d = f(i) between (i0, d0) and (i1, d1)
@@ -567,28 +575,35 @@ std::vector<double> interpolate(int i0, double d0, int i1, double d1) {
 }
 
 void drawLine(Canvas &c, vec2 p0, vec2 p1, Color color) {
-  double dx = abs(p1.x - p0.x);
-  double dy = abs(p1.y - p0.y);
+  int x0 = rasterCoord(p0.x);
+  int y0 = rasterCoord(p0.y);
+  int x1 = rasterCoord(p1.x);
+  int y1 = rasterCoord(p1.y);
+
+  int dx = std::abs(x1 - x0);
+  int dy = std::abs(y1 - y0);
 
   if (dx > dy) {
-    if (p0.x > p1.x) {
-      std::swap(p0, p1);
+    if (x0 > x1) {
+      std::swap(x0, x1);
+      std::swap(y0, y1);
     }
 
-    auto ys = interpolate(p0.x, p0.y, p1.x, p1.y);
+    auto ys = interpolate(x0, y0, x1, y1);
 
-    for (int x = p0.x; x <= p1.x; x++) {
-      c.putPixel(x, (int)ys[x - p0.x], toPixel(color));
+    for (int x = x0; x <= x1; x++) {
+      c.putPixel(x, rasterCoord(ys[x - x0]), toPixel(color));
     }
   } else {
-    if (p0.y > p1.y) {
-      std::swap(p0, p1);
+    if (y0 > y1) {
+      std::swap(x0, x1);
+      std::swap(y0, y1);
     }
 
-    auto xs = interpolate(p0.y, p0.x, p1.y, p1.x);
+    auto xs = interpolate(y0, x0, y1, x1);
 
-    for (int y = p0.y; y <= p1.y; y++) {
-      c.putPixel((int)xs[y - p0.y], y, toPixel(color));
+    for (int y = y0; y <= y1; y++) {
+      c.putPixel(rasterCoord(xs[y - y0]), y, toPixel(color));
     }
   }
 }
@@ -602,11 +617,12 @@ struct Edge {
 
 Edge interpEdge(const ScreenVertex &p0, const ScreenVertex &p1) {
   Edge e;
-  e.xs = interpolate(p0.pos.y, p0.pos.x, p1.pos.y, p1.pos.x);
+  int y0 = rasterCoord(p0.pos.y);
+  int y1 = rasterCoord(p1.pos.y);
+  e.xs = interpolate(y0, p0.pos.x, y1, p1.pos.x);
   e.attrs.reserve(N_ATTRS);
   for (int a = 0; a < N_ATTRS; a++)
-    e.attrs.push_back(
-        interpolate(p0.pos.y, p0.attrs[a], p1.pos.y, p1.attrs[a]));
+    e.attrs.push_back(interpolate(y0, p0.attrs[a], y1, p1.attrs[a]));
   return e;
 }
 
@@ -623,6 +639,10 @@ Edge concatEdges(Edge a, const Edge &b) {
 
 void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
                         ScreenVertex p2, Color color) {
+  p0 = snapToRaster(std::move(p0));
+  p1 = snapToRaster(std::move(p1));
+  p2 = snapToRaster(std::move(p2));
+
   if (p1.pos.y < p0.pos.y)
     std::swap(p1, p0);
   if (p2.pos.y < p0.pos.y)
@@ -638,10 +658,12 @@ void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
   Edge &left = longIsLeft ? longEdge : shortEdge;
   Edge &right = longIsLeft ? shortEdge : longEdge;
 
-  for (int y = p0.pos.y; y <= p2.pos.y; y++) {
-    int row = y - p0.pos.y;
-    int x_l = (int)left.xs[row];
-    int x_r = (int)right.xs[row];
+  int y0 = rasterCoord(p0.pos.y);
+  int y2 = rasterCoord(p2.pos.y);
+  for (int y = y0; y <= y2; y++) {
+    int row = y - y0;
+    int x_l = rasterCoord(left.xs[row]);
+    int x_r = rasterCoord(right.xs[row]);
 
     std::vector<std::vector<double>> segs;
     segs.reserve(N_ATTRS);
