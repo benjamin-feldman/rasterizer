@@ -229,7 +229,7 @@ struct ScreenVertex {
 struct Triangle {
   int idx[3];
   Color color;
-  double specularity;
+  double specularity = -1;
 };
 
 struct Sphere {
