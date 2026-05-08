@@ -815,14 +815,14 @@ int main() {
 
   Model cube = {"cube", vertices, triangles, cubeMaterials};
 
-  mat4 transform_1 = translation(vec3{-1, 2, 7}) * rotationX(PI / 3) *
+  mat4 transform_1 = translation(vec3{1, 2, -2}) * rotationY(PI / 3) *
                      scaling(vec3{0.5, 0.5, 0.5});
-  mat4 transform_2 = translation(vec3{0, 0, -6}) * scaling({0.3, 0.3, 0.3}) *
-                     rotationY(PI / 6) * rotationZ(PI / 6) * rotationX(PI / 4);
+  mat4 transform_2 = translation(vec3{0, -1, -6}) * scaling({0.5, 0.5, 0.5}) *
+                     rotationY(PI / 6) * rotationZ(PI / 6) * rotationX(7*PI / 6);
   ModelInstance cube_1(cube, transform_1);
   ModelInstance cube_2(cube, transform_2);
 
-  Model head = loadOBJ("head.OBJ", Material{red, 0});
+  Model head = loadOBJ("head.OBJ", Material{red, -1});
   double s = 10;
   mat4 headTransform = translation(vec3{2.5, 1.5, -5}) *
                        rotationY(1.9 * PI / 2) * scaling({s, s, s});
