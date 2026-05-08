@@ -389,15 +389,18 @@ std::vector<ClipTri> clipTriangle(ClipTri triangle, Plane plane) {
     int b = (a + 1) % 3, c = (a + 2) % 3;
     vec3 bp = intersection(plane, v[a].xyz(), v[b].xyz());
     vec3 cp = intersection(plane, v[a].xyz(), v[c].xyz());
-    return {ClipTri{v[a], bp.toVec4(), cp.toVec4(), triangle.color, triangle.specularity}};
+    return {ClipTri{v[a], bp.toVec4(), cp.toVec4(), triangle.color,
+                    triangle.specularity}};
   }
 
   int c = (d[0] < 0) ? 0 : (d[1] < 0) ? 1 : 2;
   int a = (c + 1) % 3, b = (c + 2) % 3;
   vec3 ap = intersection(plane, v[a].xyz(), v[c].xyz());
   vec3 bp = intersection(plane, v[b].xyz(), v[c].xyz());
-  return {ClipTri{v[a], v[b], ap.toVec4(), triangle.color},
-          ClipTri{ap.toVec4(), v[b], bp.toVec4(), triangle.color, triangle.specularity}};
+  return {
+      ClipTri{v[a], v[b], ap.toVec4(), triangle.color, triangle.specularity},
+      ClipTri{ap.toVec4(), v[b], bp.toVec4(), triangle.color,
+              triangle.specularity}};
 }
 
 std::vector<ClipTri>
