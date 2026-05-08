@@ -672,11 +672,15 @@ void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
                            const std::vector<Light> lights) {
   for (const auto &t : instance.triangles) {
     // backface culling
-    vec3 normal = normalize(cross(t.v1.xyz() - t.v0.xyz(), t.v2.xyz() - t.v0.xyz()));
+    vec3 normal =
+        normalize(cross(t.v1.xyz() - t.v0.xyz(), t.v2.xyz() - t.v0.xyz()));
     if (dot(normal, t.v0.xyz()) >= 0)
       continue;
 
     vec3 barycentre = (1. / 3.) * (t.v0.xyz() + t.v1.xyz() + t.v2.xyz());
+    // in camera space, the camera is at origin, so vector from point to camera
+    // is -barycentre
+    vec3 cameraDirection = -1 * barycentre;
 
     vec3 projected0 = projectionMatrix * t.v0;
     vec3 projected1 = projectionMatrix * t.v1;
@@ -687,8 +691,8 @@ void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
                           projected1.y / projected1.z};
     vec2 canvasVertex2 = {projected2.x / projected2.z,
                           projected2.y / projected2.z};
-    double illumination =
-        computeLighting(barycentre, normal, barycentre, lights, t.specularity);
+    double illumination = computeLighting(barycentre, normal, cameraDirection,
+                                          lights, t.specularity);
     ScreenVertex screenVertex0(canvasVertex0,
                                {illumination, 1.0 / projected0.z});
     ScreenVertex screenVertex1(canvasVertex1,
