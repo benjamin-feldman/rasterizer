@@ -473,35 +473,50 @@ struct Canvas {
       drawAxis();
   }
 
-  void putPixelRaw(int x, int y, Pixel pixel) {
-    if (x < 0 || x >= Cw || y < 0 || y >= Ch)
-      return;
-    pixels[y * Cw + x] = pixel;
+  bool isInBounds(int sx, int sy) const {
+    return sx >= 0 && sx < Cw && sy >= 0 && sy < Ch;
+  }
+
+  bool toScreen(int x, int y, int &sx, int &sy) const {
+    sx = Cw / 2 + x;
+    sy = Ch / 2 - y;
+    return isInBounds(sx, sy);
+  }
+
+  void putPixelRaw(int sx, int sy, Pixel pixel) {
+    assert(isInBounds(sx, sy));
+    pixels[sy * Cw + sx] = pixel;
   }
 
   void putPixel(int x, int y, Pixel pixel) {
     // (x, y) in math coordinates
-    int sx = Cw / 2 + x;
-    int sy = Ch / 2 - y;
+    int sx, sy;
+    if (!toScreen(x, y, sx, sy)) {
+      return;
+    }
     putPixelRaw(sx, sy, pixel);
   }
 
-  void putDepthRaw(int x, int y, double depth) {
-    if (x < 0 || x >= Cw || y < 0 || y >= Ch)
-      return;
-    depths[y * Cw + x] = depth;
+  void putDepthRaw(int sx, int sy, double depth) {
+    assert(isInBounds(sx, sy));
+    depths[sy * Cw + sx] = depth;
   }
 
   void putDepth(int x, int y, double depth) {
-    int sx = Cw / 2 + x;
-    int sy = Ch / 2 - y;
+    int sx, sy;
+    if (!toScreen(x, y, sx, sy)) {
+      return;
+    }
     putDepthRaw(sx, sy, depth);
   }
 
-  double getDepth(int x, int y) {
-    int sx = Cw / 2 + x;
-    int sy = Ch / 2 - y;
-    return depths[sy * Cw + sx];
+  bool getDepth(int x, int y, double &depth) const {
+    int sx, sy;
+    if (!toScreen(x, y, sx, sy)) {
+      return false;
+    }
+    depth = depths[sy * Cw + sx];
+    return true;
   }
 
   void drawAxis() {
@@ -637,7 +652,8 @@ void drawShadedTriangle(Canvas &c, ScreenVertex p0, ScreenVertex p1,
     for (int x = x_l; x <= x_r; x++) {
       double h = segs[ATTR_H][x - x_l];
       double d = segs[ATTR_DEPTH][x - x_l];
-      if (d > c.getDepth(x, y)) {
+      double pixelCurrentDepth;
+      if (c.getDepth(x, y, pixelCurrentDepth) && d > pixelCurrentDepth) {
         c.putPixel(x, y, toPixel(h * color));
         c.putDepth(x, y, d);
       }
