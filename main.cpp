@@ -226,10 +226,14 @@ struct ScreenVertex {
       : pos(pos), attrs(std::move(attrs)) {}
 };
 
-struct Triangle {
-  int idx[3];
+struct Material {
   Color color;
   double specularity = -1;
+};
+
+struct Triangle {
+  int idx[3];
+  int materialIdx;
 };
 
 struct Sphere {
@@ -241,10 +245,12 @@ struct Model {
   char name[16];
   std::vector<vec4> vertices;
   std::vector<Triangle> triangles;
+  std::vector<Material> materials;
 };
 
-Model loadOBJ(const char *path, Color color, double specularity) {
+Model loadOBJ(const char *path, Material material) {
   Model model = {};
+  model.materials.push_back(material);
   const char *slash = strrchr(path, '/');
   const char *base = slash ? slash + 1 : path;
   snprintf(model.name, sizeof(model.name), "%s", base);
@@ -270,8 +276,7 @@ Model loadOBJ(const char *path, Color color, double specularity) {
         face.push_back(idx - 1); // OBJ is 1-based
       }
       for (int i = 1; i + 1 < (int)face.size(); i++)
-        model.triangles.push_back(
-            {{face[0], face[i], face[i + 1]}, color, specularity});
+        model.triangles.push_back({{face[0], face[i], face[i + 1]}, 0});
     }
   }
   return model;
@@ -295,8 +300,7 @@ struct ClipTri {
   vec4 v0;
   vec4 v1;
   vec4 v2;
-  Color color;
-  double specularity;
+  Material material;
 };
 
 struct Scene {
@@ -306,12 +310,15 @@ struct Scene {
 
 std::vector<ClipTri> triToClipTri(const std::vector<vec4> &vertices,
                                   const std::vector<Triangle> &triangles,
+                                  const std::vector<Material> &materials,
                                   const mat4 &transform) {
   std::vector<ClipTri> clipTriangles;
   for (auto const &t : triangles) {
+    assert(t.materialIdx >= 0 && t.materialIdx < (int)materials.size());
     ClipTri clipTri = {transform * vertices[t.idx[0]],
                        transform * vertices[t.idx[1]],
-                       transform * vertices[t.idx[2]], t.color, t.specularity};
+                       transform * vertices[t.idx[2]],
+                       materials[t.materialIdx]};
     clipTriangles.push_back(clipTri);
   }
   return clipTriangles;
@@ -389,18 +396,15 @@ std::vector<ClipTri> clipTriangle(ClipTri triangle, Plane plane) {
     int b = (a + 1) % 3, c = (a + 2) % 3;
     vec3 bp = intersection(plane, v[a].xyz(), v[b].xyz());
     vec3 cp = intersection(plane, v[a].xyz(), v[c].xyz());
-    return {ClipTri{v[a], bp.toVec4(), cp.toVec4(), triangle.color,
-                    triangle.specularity}};
+    return {ClipTri{v[a], bp.toVec4(), cp.toVec4(), triangle.material}};
   }
 
   int c = (d[0] < 0) ? 0 : (d[1] < 0) ? 1 : 2;
   int a = (c + 1) % 3, b = (c + 2) % 3;
   vec3 ap = intersection(plane, v[a].xyz(), v[c].xyz());
   vec3 bp = intersection(plane, v[b].xyz(), v[c].xyz());
-  return {
-      ClipTri{v[a], v[b], ap.toVec4(), triangle.color, triangle.specularity},
-      ClipTri{ap.toVec4(), v[b], bp.toVec4(), triangle.color,
-              triangle.specularity}};
+  return {ClipTri{v[a], v[b], ap.toVec4(), triangle.material},
+          ClipTri{ap.toVec4(), v[b], bp.toVec4(), triangle.material}};
 }
 
 std::vector<ClipTri>
@@ -451,7 +455,7 @@ std::vector<ClippedInstance> clipScene(const Scene &scene,
     ClippedInstance initial;
     initial.triangles =
         triToClipTri(instance.model.vertices, instance.model.triangles,
-                     cameraMatrix * instance.transform);
+                     instance.model.materials, cameraMatrix * instance.transform);
     if (auto clipped = clipInstance(initial, planes)) {
       clippedInstances.push_back(std::move(*clipped));
     }
@@ -714,14 +718,15 @@ void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
     vec2 canvasVertex2 = {projected2.x / projected2.z,
                           projected2.y / projected2.z};
     double illumination = computeLighting(barycentre, normal, cameraDirection,
-                                          lights, t.specularity);
+                                          lights, t.material.specularity);
     ScreenVertex screenVertex0(canvasVertex0,
                                {illumination, 1.0 / projected0.z});
     ScreenVertex screenVertex1(canvasVertex1,
                                {illumination, 1.0 / projected1.z});
     ScreenVertex screenVertex2(canvasVertex2,
                                {illumination, 1.0 / projected2.z});
-    drawShadedTriangle(c, screenVertex0, screenVertex1, screenVertex2, t.color);
+    drawShadedTriangle(c, screenVertex0, screenVertex1, screenVertex2,
+                       t.material.color);
   }
 }
 
@@ -786,18 +791,29 @@ int main() {
   Color purple = {.5, .5, .5};
   Color black = {0, 0, 0};
   Color white = {1, 1, 1};
+  constexpr int MAT_RED = 0;
+  constexpr int MAT_GREEN = 1;
+  constexpr int MAT_BLUE = 2;
+  constexpr int MAT_YELLOW = 3;
+  constexpr int MAT_PURPLE = 4;
+  constexpr int MAT_CYAN = 5;
 
   std::vector<vec4> vertices = {{1, 1, 1, 1},    {-1, 1, 1, 1}, {-1, -1, 1, 1},
                                 {1, -1, 1, 1},   {1, 1, -1, 1}, {-1, 1, -1, 1},
                                 {-1, -1, -1, 1}, {1, -1, -1, 1}};
 
-  std::vector<Triangle> triangles = {
-      {{0, 1, 2}, red},    {{0, 2, 3}, red},    {{4, 0, 3}, green},
-      {{4, 3, 7}, green},  {{5, 4, 7}, blue},   {{5, 7, 6}, blue},
-      {{1, 5, 6}, yellow}, {{1, 6, 2}, yellow}, {{4, 5, 1}, purple},
-      {{4, 1, 0}, purple}, {{2, 6, 7}, cyan},   {{2, 7, 3}, cyan}};
+  std::vector<Material> cubeMaterials = {
+      {red}, {green}, {blue}, {yellow}, {purple}, {cyan}};
 
-  Model cube = {"cube", vertices, triangles};
+  std::vector<Triangle> triangles = {
+      {{0, 1, 2}, MAT_RED},    {{0, 2, 3}, MAT_RED},
+      {{4, 0, 3}, MAT_GREEN},  {{4, 3, 7}, MAT_GREEN},
+      {{5, 4, 7}, MAT_BLUE},   {{5, 7, 6}, MAT_BLUE},
+      {{1, 5, 6}, MAT_YELLOW}, {{1, 6, 2}, MAT_YELLOW},
+      {{4, 5, 1}, MAT_PURPLE}, {{4, 1, 0}, MAT_PURPLE},
+      {{2, 6, 7}, MAT_CYAN},   {{2, 7, 3}, MAT_CYAN}};
+
+  Model cube = {"cube", vertices, triangles, cubeMaterials};
 
   mat4 transform_1 = translation(vec3{-1, 2, 7}) * rotationX(PI / 3) *
                      scaling(vec3{0.5, 0.5, 0.5});
@@ -806,7 +822,7 @@ int main() {
   ModelInstance cube_1(cube, transform_1);
   ModelInstance cube_2(cube, transform_2);
 
-  Model head = loadOBJ("head.OBJ", red, 0);
+  Model head = loadOBJ("head.OBJ", Material{red, 0});
   double s = 10;
   mat4 headTransform = translation(vec3{2.5, 1.5, -5}) *
                        rotationY(1.9 * PI / 2) * scaling({s, s, s});
