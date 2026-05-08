@@ -322,7 +322,7 @@ struct ClippedInstance {
 };
 
 Sphere getBoundingSphere(const ClippedInstance &instance) {
-  vec3 center;
+  vec3 center = {};
   int n = 0;
   for (const auto &t : instance.triangles) {
     center = center + t.v0.xyz() + t.v1.xyz() + t.v2.xyz();
