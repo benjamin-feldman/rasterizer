@@ -1,6 +1,5 @@
 #include <cassert>
 #include <cmath>
-#include <complex>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
@@ -544,9 +543,11 @@ struct Canvas {
   std::vector<Pixel> pixels;
   // same for depths
   std::vector<double> depths;
+  Color backgroundColor;
 
-  Canvas(int w, int h)
-      : Cw(w), Ch(h), pixels(w * h, Pixel{255, 255, 255}), depths(w * h, 0) {
+  Canvas(int w, int h, Color backgroundColor = {1, 1, 1})
+      : Cw(w), Ch(h), pixels(w * h, toPixel(backgroundColor)),
+        depths(w * h, 0) {
     if (DEBUG_AXES)
       drawAxis();
   }
@@ -892,23 +893,39 @@ int main() {
   Model cube = {"cube", vertices, {}, triangles, cubeMaterials};
   computeVertexNormals(cube);
 
-  mat4 transform_1 = translation(vec3{1, 2, -2}) * rotationY(PI / 3) *
-                     scaling(vec3{0.5, 0.5, 0.5});
-  mat4 transform_2 = translation(vec3{0, -1, -6}) * scaling({0.5, 0.5, 0.5}) *
-                     rotationY(PI / 6) * rotationZ(PI / 6) * rotationX(7*PI / 6);
-  ModelInstance cube_1(cube, transform_1);
-  ModelInstance cube_2(cube, transform_2);
-
-  Model head = loadOBJ("head.OBJ", Material{red, -1});
+  Model head = loadOBJ("head.OBJ", Material{white, -1});
   double s = 10;
   Camera camera = {vec3{0, 0, -10}, vec3{2, 1, 1}};
-  int canvasSize = 800;
-  Canvas canvas(canvasSize, canvasSize);
+  int canvasSize = 1000;
   Light sun = {DIRECTIONAL, {0, 10, -3}, {0.3, 1, 0}, 2};
   Light ambient = {AMBIENT, {}, {}, 0.7};
-  Scene scene = {{ModelInstance(head, headTransform), cube_1, cube_2},
-                 {sun, ambient}};
-  renderScene(canvas, vp, camera, scene);
-  canvas.save();
+
+  constexpr int FPS = 10;
+  constexpr int DURATION_SECONDS = 20;
+  constexpr int N_FRAMES = FPS * DURATION_SECONDS;
+  std::filesystem::create_directories("frames");
+
+  for (int frame = 0; frame < N_FRAMES; frame++) {
+    double angle = 0.5 * PI * frame / N_FRAMES;
+    mat4 headTransform = translation(vec3{2.5, 1.5, -5}) *
+                         rotationY(1.9 * PI / 2 + angle) * scaling({s, s, s});
+
+    mat4 cube1Transform = translation(vec3{1, 2, -2}) * rotationY(PI / 3 + angle) *
+                          scaling(vec3{0.5, 0.5, 0.5});
+    mat4 cube2Transform = translation(vec3{0, -1, -6}) *
+                          scaling({0.5, 0.5, 0.5}) * rotationY(PI / 6) *
+                          rotationZ(PI / 6) * rotationX(7 * PI / 6 + angle);
+
+    Canvas canvas(canvasSize, canvasSize, {0, 0, 0});
+    Scene scene = {{ModelInstance(head, headTransform),
+                    ModelInstance(cube, cube1Transform),
+                    ModelInstance(cube, cube2Transform)},
+                   {sun, ambient}};
+    renderScene(canvas, vp, camera, scene);
+
+    char path[64];
+    snprintf(path, sizeof(path), "frames/frame_%04d.ppm", frame);
+    canvas.save(path);
+  }
   return 0;
 }
