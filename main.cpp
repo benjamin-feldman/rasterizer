@@ -3,6 +3,7 @@
 #include <complex>
 #include <cstdint>
 #include <cstdio>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <optional>
@@ -55,6 +56,14 @@ vec3 cross(vec3 a, vec3 b) {
 }
 vec3 normalize(vec3 a) { return (1.0 / sqrt(dot(a, a))) * a; }
 double norm2(vec3 a) { return sqrt(dot(a, a)); }
+vec3 normalizeOrZero(vec3 a) {
+  double length = norm2(a);
+  return length == 0 ? vec3{0, 0, 0} : a / length;
+}
+vec3 lerp(vec3 a, vec3 b, double t) {
+  // t \in [0, 1]
+  return a + t * (b - a);
+}
 
 using Color = vec3; // r,g,b in [0, 1]
 
@@ -67,6 +76,11 @@ struct vec4 {
 
   vec3 xyz() const { return vec3{x, y, z}; }
 };
+
+vec4 lerp(vec4 a, vec4 b, double t) {
+  return {a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), a.z + t * (b.z - a.z),
+          a.w + t * (b.w - a.w)};
+}
 
 struct mat4 {
   double m[4][4] = {};
@@ -91,6 +105,11 @@ vec4 operator*(const mat4 &a, const vec4 &u) {
         a.m[i][0] * u.x + a.m[i][1] * u.y + a.m[i][2] * u.z + a.m[i][3] * u.w;
   }
   return vec4{v[0], v[1], v[2], v[3]};
+}
+
+vec3 transformNormal(const mat4 &transform, vec3 normal) {
+  vec4 transformed = transform * vec4{normal.x, normal.y, normal.z, 0};
+  return normalizeOrZero(transformed.xyz());
 }
 
 inline vec4 vec3::toVec4() const { return {x, y, z, 1}; }
@@ -232,7 +251,7 @@ struct Material {
 };
 
 struct Triangle {
-  int idx[3];
+  int verticesIdx[3];
   int materialIdx;
 };
 
@@ -244,9 +263,38 @@ struct Sphere {
 struct Model {
   char name[16];
   std::vector<vec4> vertices;
+  std::vector<vec3> vertexNormals;
   std::vector<Triangle> triangles;
   std::vector<Material> materials;
 };
+
+void computeVertexNormals(Model &model) {
+  model.vertexNormals.assign(model.vertices.size(), vec3{0, 0, 0});
+
+  for (const Triangle &t : model.triangles) {
+    assert(t.verticesIdx[0] >= 0 &&
+           t.verticesIdx[0] < (int)model.vertices.size());
+    assert(t.verticesIdx[1] >= 0 &&
+           t.verticesIdx[1] < (int)model.vertices.size());
+    assert(t.verticesIdx[2] >= 0 &&
+           t.verticesIdx[2] < (int)model.vertices.size());
+
+    vec3 v0 = model.vertices[t.verticesIdx[0]].xyz();
+    vec3 v1 = model.vertices[t.verticesIdx[1]].xyz();
+    vec3 v2 = model.vertices[t.verticesIdx[2]].xyz();
+    vec3 faceNormal = normalizeOrZero(cross(v1 - v0, v2 - v0));
+    model.vertexNormals[t.verticesIdx[0]] =
+        model.vertexNormals[t.verticesIdx[0]] + faceNormal;
+    model.vertexNormals[t.verticesIdx[1]] =
+        model.vertexNormals[t.verticesIdx[1]] + faceNormal;
+    model.vertexNormals[t.verticesIdx[2]] =
+        model.vertexNormals[t.verticesIdx[2]] + faceNormal;
+  }
+
+  for (vec3 &normal : model.vertexNormals) {
+    normal = normalizeOrZero(normal);
+  }
+}
 
 Model loadOBJ(const char *path, Material material) {
   Model model = {};
@@ -279,6 +327,7 @@ Model loadOBJ(const char *path, Material material) {
         model.triangles.push_back({{face[0], face[i], face[i + 1]}, 0});
     }
   }
+  computeVertexNormals(model);
   return model;
 }
 
@@ -300,6 +349,9 @@ struct ClipTri {
   vec4 v0;
   vec4 v1;
   vec4 v2;
+  vec3 n0;
+  vec3 n1;
+  vec3 n2;
   Material material;
 };
 
@@ -309,16 +361,28 @@ struct Scene {
 };
 
 std::vector<ClipTri> triToClipTri(const std::vector<vec4> &vertices,
+                                  const std::vector<vec3> &vertexNormals,
                                   const std::vector<Triangle> &triangles,
                                   const std::vector<Material> &materials,
                                   const mat4 &transform) {
   std::vector<ClipTri> clipTriangles;
   for (auto const &t : triangles) {
     assert(t.materialIdx >= 0 && t.materialIdx < (int)materials.size());
-    ClipTri clipTri = {transform * vertices[t.idx[0]],
-                       transform * vertices[t.idx[1]],
-                       transform * vertices[t.idx[2]],
-                       materials[t.materialIdx]};
+    assert(t.verticesIdx[0] >= 0 && t.verticesIdx[0] < (int)vertices.size());
+    assert(t.verticesIdx[1] >= 0 && t.verticesIdx[1] < (int)vertices.size());
+    assert(t.verticesIdx[2] >= 0 && t.verticesIdx[2] < (int)vertices.size());
+    assert(t.verticesIdx[0] < (int)vertexNormals.size());
+    assert(t.verticesIdx[1] < (int)vertexNormals.size());
+    assert(t.verticesIdx[2] < (int)vertexNormals.size());
+
+    ClipTri clipTri = {
+        transform * vertices[t.verticesIdx[0]],
+        transform * vertices[t.verticesIdx[1]],
+        transform * vertices[t.verticesIdx[2]],
+        transformNormal(transform, vertexNormals[t.verticesIdx[0]]),
+        transformNormal(transform, vertexNormals[t.verticesIdx[1]]),
+        transformNormal(transform, vertexNormals[t.verticesIdx[2]]),
+        materials[t.materialIdx]};
     clipTriangles.push_back(clipTri);
   }
   return clipTriangles;
@@ -373,14 +437,15 @@ double signedDistance(Plane plane, vec3 vertex) {
   return dot(plane.normal, vertex) + plane.D;
 }
 
-vec3 intersection(Plane plane, vec3 a, vec3 b) {
-  // intersection between AB and plane (assuming existence of such intersection)
-  double t = (-plane.D - dot(plane.normal, a)) / dot(plane.normal, b - a);
-  return a + t * (b - a);
+double intersectionParameter(Plane plane, vec3 a, vec3 b) {
+  // returns t s.t. lerp(a, b, t) lies on the plane. Clipping needs this
+  // value to interpolate both the new vertex position and its normal.
+  return (-plane.D - dot(plane.normal, a)) / dot(plane.normal, b - a);
 }
 
 std::vector<ClipTri> clipTriangle(ClipTri triangle, Plane plane) {
   vec4 v[3] = {triangle.v0, triangle.v1, triangle.v2};
+  vec3 n[3] = {triangle.n0, triangle.n1, triangle.n2};
   double d[3] = {signedDistance(plane, v[0].xyz()),
                  signedDistance(plane, v[1].xyz()),
                  signedDistance(plane, v[2].xyz())};
@@ -394,17 +459,25 @@ std::vector<ClipTri> clipTriangle(ClipTri triangle, Plane plane) {
   if (nPos == 1) {
     int a = (d[0] >= 0) ? 0 : (d[1] >= 0) ? 1 : 2;
     int b = (a + 1) % 3, c = (a + 2) % 3;
-    vec3 bp = intersection(plane, v[a].xyz(), v[b].xyz());
-    vec3 cp = intersection(plane, v[a].xyz(), v[c].xyz());
-    return {ClipTri{v[a], bp.toVec4(), cp.toVec4(), triangle.material}};
+    double tb = intersectionParameter(plane, v[a].xyz(), v[b].xyz());
+    double tc = intersectionParameter(plane, v[a].xyz(), v[c].xyz());
+    vec4 bp = lerp(v[a], v[b], tb);
+    vec4 cp = lerp(v[a], v[c], tc);
+    vec3 bn = normalizeOrZero(lerp(n[a], n[b], tb));
+    vec3 cn = normalizeOrZero(lerp(n[a], n[c], tc));
+    return {ClipTri{v[a], bp, cp, n[a], bn, cn, triangle.material}};
   }
 
   int c = (d[0] < 0) ? 0 : (d[1] < 0) ? 1 : 2;
   int a = (c + 1) % 3, b = (c + 2) % 3;
-  vec3 ap = intersection(plane, v[a].xyz(), v[c].xyz());
-  vec3 bp = intersection(plane, v[b].xyz(), v[c].xyz());
-  return {ClipTri{v[a], v[b], ap.toVec4(), triangle.material},
-          ClipTri{ap.toVec4(), v[b], bp.toVec4(), triangle.material}};
+  double ta = intersectionParameter(plane, v[a].xyz(), v[c].xyz());
+  double tb = intersectionParameter(plane, v[b].xyz(), v[c].xyz());
+  vec4 ap = lerp(v[a], v[c], ta);
+  vec4 bp = lerp(v[b], v[c], tb);
+  vec3 an = normalizeOrZero(lerp(n[a], n[c], ta));
+  vec3 bn = normalizeOrZero(lerp(n[b], n[c], tb));
+  return {ClipTri{v[a], v[b], ap, n[a], n[b], an, triangle.material},
+          ClipTri{ap, v[b], bp, an, n[b], bn, triangle.material}};
 }
 
 std::vector<ClipTri>
@@ -454,8 +527,9 @@ std::vector<ClippedInstance> clipScene(const Scene &scene,
   for (auto const &instance : scene.instances) {
     ClippedInstance initial;
     initial.triangles =
-        triToClipTri(instance.model.vertices, instance.model.triangles,
-                     instance.model.materials, cameraMatrix * instance.transform);
+        triToClipTri(instance.model.vertices, instance.model.vertexNormals,
+                     instance.model.triangles, instance.model.materials,
+                     cameraMatrix * instance.transform);
     if (auto clipped = clipInstance(initial, planes)) {
       clippedInstances.push_back(std::move(*clipped));
     }
@@ -698,15 +772,12 @@ void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
                            const std::vector<Light> lights) {
   for (const auto &t : instance.triangles) {
     // backface culling
-    vec3 normal =
-        normalize(cross(t.v1.xyz() - t.v0.xyz(), t.v2.xyz() - t.v0.xyz()));
-    if (dot(normal, t.v0.xyz()) >= 0)
+    vec3 faceNormal = cross(t.v1.xyz() - t.v0.xyz(), t.v2.xyz() - t.v0.xyz());
+    if (norm2(faceNormal) == 0)
       continue;
-
-    vec3 barycentre = (1. / 3.) * (t.v0.xyz() + t.v1.xyz() + t.v2.xyz());
-    // in camera space, the camera is at origin, so vector from point to camera
-    // is -barycentre
-    vec3 cameraDirection = -1 * barycentre;
+    faceNormal = normalize(faceNormal);
+    if (dot(faceNormal, t.v0.xyz()) >= 0)
+      continue;
 
     vec3 projected0 = projectionMatrix * t.v0;
     vec3 projected1 = projectionMatrix * t.v1;
@@ -717,14 +788,21 @@ void renderClippedInstance(Canvas &c, const ClippedInstance &instance,
                           projected1.y / projected1.z};
     vec2 canvasVertex2 = {projected2.x / projected2.z,
                           projected2.y / projected2.z};
-    double illumination = computeLighting(barycentre, normal, cameraDirection,
-                                          lights, t.material.specularity);
+    // computeLighting expects: point position, surface normal, direction from
+    // point to camera, scene lights, and material specularity. Vertices are in
+    // camera space, so the camera is at the origin and point->camera is -point.
+    double illumination0 = computeLighting(t.v0.xyz(), t.n0, -1 * t.v0.xyz(),
+                                           lights, t.material.specularity);
+    double illumination1 = computeLighting(t.v1.xyz(), t.n1, -1 * t.v1.xyz(),
+                                           lights, t.material.specularity);
+    double illumination2 = computeLighting(t.v2.xyz(), t.n2, -1 * t.v2.xyz(),
+                                           lights, t.material.specularity);
     ScreenVertex screenVertex0(canvasVertex0,
-                               {illumination, 1.0 / projected0.z});
+                               {illumination0, 1.0 / projected0.z});
     ScreenVertex screenVertex1(canvasVertex1,
-                               {illumination, 1.0 / projected1.z});
+                               {illumination1, 1.0 / projected1.z});
     ScreenVertex screenVertex2(canvasVertex2,
-                               {illumination, 1.0 / projected2.z});
+                               {illumination2, 1.0 / projected2.z});
     drawShadedTriangle(c, screenVertex0, screenVertex1, screenVertex2,
                        t.material.color);
   }
@@ -802,18 +880,17 @@ int main() {
                                 {1, -1, 1, 1},   {1, 1, -1, 1}, {-1, 1, -1, 1},
                                 {-1, -1, -1, 1}, {1, -1, -1, 1}};
 
-  std::vector<Material> cubeMaterials = {
-      {red}, {green}, {blue}, {yellow}, {purple}, {cyan}};
+  std::vector<Material> cubeMaterials = {{red},    {green},  {blue},
+                                         {yellow}, {purple}, {cyan}};
 
   std::vector<Triangle> triangles = {
-      {{0, 1, 2}, MAT_RED},    {{0, 2, 3}, MAT_RED},
-      {{4, 0, 3}, MAT_GREEN},  {{4, 3, 7}, MAT_GREEN},
-      {{5, 4, 7}, MAT_BLUE},   {{5, 7, 6}, MAT_BLUE},
-      {{1, 5, 6}, MAT_YELLOW}, {{1, 6, 2}, MAT_YELLOW},
-      {{4, 5, 1}, MAT_PURPLE}, {{4, 1, 0}, MAT_PURPLE},
-      {{2, 6, 7}, MAT_CYAN},   {{2, 7, 3}, MAT_CYAN}};
+      {{0, 1, 2}, MAT_RED},    {{0, 2, 3}, MAT_RED},    {{4, 0, 3}, MAT_GREEN},
+      {{4, 3, 7}, MAT_GREEN},  {{5, 4, 7}, MAT_BLUE},   {{5, 7, 6}, MAT_BLUE},
+      {{1, 5, 6}, MAT_YELLOW}, {{1, 6, 2}, MAT_YELLOW}, {{4, 5, 1}, MAT_PURPLE},
+      {{4, 1, 0}, MAT_PURPLE}, {{2, 6, 7}, MAT_CYAN},   {{2, 7, 3}, MAT_CYAN}};
 
-  Model cube = {"cube", vertices, triangles, cubeMaterials};
+  Model cube = {"cube", vertices, {}, triangles, cubeMaterials};
+  computeVertexNormals(cube);
 
   mat4 transform_1 = translation(vec3{1, 2, -2}) * rotationY(PI / 3) *
                      scaling(vec3{0.5, 0.5, 0.5});
@@ -824,9 +901,6 @@ int main() {
 
   Model head = loadOBJ("head.OBJ", Material{red, -1});
   double s = 10;
-  mat4 headTransform = translation(vec3{2.5, 1.5, -5}) *
-                       rotationY(1.9 * PI / 2) * scaling({s, s, s});
-
   Camera camera = {vec3{0, 0, -10}, vec3{2, 1, 1}};
   int canvasSize = 800;
   Canvas canvas(canvasSize, canvasSize);
