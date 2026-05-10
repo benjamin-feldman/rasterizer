@@ -27,20 +27,13 @@ inline vec3 operator+(vec3 a, vec3 b) {
 inline vec3 operator-(vec3 a, vec3 b) {
   return {a.x - b.x, a.y - b.y, a.z - b.z};
 }
-inline vec3 operator*(double s, vec3 a) {
-  return {s * a.x, s * a.y, s * a.z};
-}
-inline vec3 operator/(vec3 a, double s) {
-  return {a.x / s, a.y / s, a.z / s};
-}
+inline vec3 operator*(double s, vec3 a) { return {s * a.x, s * a.y, s * a.z}; }
+inline vec3 operator/(vec3 a, double s) { return {a.x / s, a.y / s, a.z / s}; }
 
-inline double dot(vec3 a, vec3 b) {
-  return a.x * b.x + a.y * b.y + a.z * b.z;
-}
+inline double dot(vec3 a, vec3 b) { return a.x * b.x + a.y * b.y + a.z * b.z; }
 
 inline vec3 cross(vec3 a, vec3 b) {
-  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z,
-          a.x * b.y - a.y * b.x};
+  return {a.y * b.z - a.z * b.y, a.z * b.x - a.x * b.z, a.x * b.y - a.y * b.x};
 }
 
 inline vec3 normalize(vec3 a) { return (1.0 / std::sqrt(dot(a, a))) * a; }
@@ -63,8 +56,8 @@ struct vec4 {
 };
 
 inline vec4 lerp(vec4 a, vec4 b, double t) {
-  return {a.x + t * (b.x - a.x), a.y + t * (b.y - a.y),
-          a.z + t * (b.z - a.z), a.w + t * (b.w - a.w)};
+  return {a.x + t * (b.x - a.x), a.y + t * (b.y - a.y), a.z + t * (b.z - a.z),
+          a.w + t * (b.w - a.w)};
 }
 
 struct mat4 {
@@ -164,10 +157,13 @@ inline mat34 operator*(const mat34 &a, const mat4 &b) {
   return c;
 }
 
-inline mat34 canvasProjectionMatrix(double d, int Cw, int Ch, double Vw,
-                                    double Vh) {
+inline mat34 canvasProjectionMatrix(double distance, int canvasWidth,
+                                    int canvasHeight, double viewportWidth,
+                                    double viewportHeight) {
   // projects from Camera space to Canvas
-  return {{{d * Cw / Vw, 0, 0, 0}, {0, d * Ch / Vh, 0, 0}, {0, 0, 1, 0}}};
+  return {{{distance * canvasWidth / viewportWidth, 0, 0, 0},
+           {0, distance * canvasHeight / viewportHeight, 0, 0},
+           {0, 0, 1, 0}}};
 }
 
 inline double clamp(double x, double a, double b) {

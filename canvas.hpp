@@ -3,8 +3,11 @@
 #include "math.hpp"
 
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
-#include <cstdio>
+#include <fstream>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 constexpr bool DEBUG_AXES = false;
@@ -12,8 +15,11 @@ constexpr bool DEBUG_AXES = false;
 using Color = vec3; // r,g,b in [0, 1]
 
 struct Pixel {
-  uint8_t r, g, b;
+  uint8_t r;
+  uint8_t g;
+  uint8_t b;
 };
+static_assert(sizeof(Pixel) == 3);
 
 inline Pixel toPixel(Color c) {
   return {
@@ -24,34 +30,49 @@ inline Pixel toPixel(Color c) {
 }
 
 struct Canvas {
-  int Cw, Ch;
-  // Contiguous list of pixels
-  // pixel (x, y) is at pixels[y*width + x]
+  int width = 0;
+  int height = 0;
+  // Contiguous row-major storage: pixel (x, y) is pixels[y * width + x].
   std::vector<Pixel> pixels;
-  // same for depths
+  // Same layout as pixels
   std::vector<double> depths;
   Color backgroundColor;
 
-  Canvas(int w, int h, Color backgroundColor = {1, 1, 1})
-      : Cw(w), Ch(h), pixels(w * h, toPixel(backgroundColor)),
-        depths(w * h, 0) {
+  explicit Canvas(int canvasWidth, int canvasHeight,
+                  Color backgroundColor = {1, 1, 1})
+      : width(canvasWidth), height(canvasHeight),
+        pixels(pixelCountFor(canvasWidth, canvasHeight),
+               toPixel(backgroundColor)),
+        depths(pixelCountFor(canvasWidth, canvasHeight), 0.0),
+        backgroundColor(backgroundColor) {
     if (DEBUG_AXES)
       drawAxis();
   }
 
+  static std::size_t pixelCountFor(int width, int height) {
+    assert(width > 0);
+    assert(height > 0);
+    return static_cast<std::size_t>(width) * static_cast<std::size_t>(height);
+  }
+
+  std::size_t pixelIndex(int sx, int sy) const {
+    assert(isInBounds(sx, sy));
+    return static_cast<std::size_t>(sy) * static_cast<std::size_t>(width) +
+           static_cast<std::size_t>(sx);
+  }
+
   bool isInBounds(int sx, int sy) const {
-    return sx >= 0 && sx < Cw && sy >= 0 && sy < Ch;
+    return sx >= 0 && sx < width && sy >= 0 && sy < height;
   }
 
   bool toScreen(int x, int y, int &sx, int &sy) const {
-    sx = Cw / 2 + x;
-    sy = Ch / 2 - y;
+    sx = width / 2 + x;
+    sy = height / 2 - y;
     return isInBounds(sx, sy);
   }
 
   void putPixelRaw(int sx, int sy, Pixel pixel) {
-    assert(isInBounds(sx, sy));
-    pixels[sy * Cw + sx] = pixel;
+    pixels[pixelIndex(sx, sy)] = pixel;
   }
 
   void putPixel(int x, int y, Pixel pixel) {
@@ -64,8 +85,7 @@ struct Canvas {
   }
 
   void putDepthRaw(int sx, int sy, double depth) {
-    assert(isInBounds(sx, sy));
-    depths[sy * Cw + sx] = depth;
+    depths[pixelIndex(sx, sy)] = depth;
   }
 
   void putDepth(int x, int y, double depth) {
@@ -81,32 +101,40 @@ struct Canvas {
     if (!toScreen(x, y, sx, sy)) {
       return false;
     }
-    depth = depths[sy * Cw + sx];
+    depth = depths[pixelIndex(sx, sy)];
     return true;
   }
 
   void drawAxis() {
-    int midW = Cw / 2;
-    int midH = Ch / 2;
+    int midW = width / 2;
+    int midH = height / 2;
     Pixel grey = {150, 150, 150};
-    for (int i = 0; i < Cw; i++) {
+    for (int i = 0; i < width; i++) {
       putPixelRaw(i, midH, grey);
     }
 
-    for (int j = 0; j < Ch; j++) {
+    for (int j = 0; j < height; j++) {
       putPixelRaw(midW, j, grey);
     }
   }
 
-  void save(const char *path = "out.ppm") {
-    std::FILE *f = std::fopen(path, "wb");
-    std::fprintf(f, "P6\n%d %d\n255\n", Cw, Ch);
-    std::fwrite(pixels.data(), sizeof(Pixel), Cw * Ch, f);
-    std::fclose(f);
+  void save(const std::string &path = "out.ppm") const {
+    std::ofstream file(path, std::ios::binary);
+    if (!file) {
+      throw std::runtime_error("could not open output file: " + path);
+    }
+
+    file << "P6\n" << width << ' ' << height << "\n255\n";
+    file.write(reinterpret_cast<const char *>(pixels.data()),
+               static_cast<std::streamsize>(pixels.size() * sizeof(Pixel)));
+    if (!file) {
+      throw std::runtime_error("could not write output file: " + path);
+    }
   }
 };
 
 struct Viewport {
-  double Vw, Vh, d;
-  Viewport(int w, int h, double d) : Vw(w), Vh(h), d(d) {};
+  double width;
+  double height;
+  double distance;
 };
